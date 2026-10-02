@@ -290,3 +290,48 @@ def test_section_header_and_accent(qtbot):
     qtbot.addWidget(h)
     h.set_accent("#FF5A5F")
     assert h.accent == "#FF5A5F" and h._title.text() == "PERFORMANS"
+
+
+# ---- review regressions -------------------------------------------------------
+def _wheel(qtbot, w, delta=120):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QWheelEvent
+    from PyQt6.QtWidgets import QApplication
+    ev = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, delta), Qt.MouseButton.NoButton,
+                     Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(w, ev)
+    QApplication.processEvents()
+    return ev
+
+
+def test_slider_wheel_is_ignored_and_never_commits(qtbot):
+    s = ValueSlider("PL1", "", 20, 100, 5, " W")
+    qtbot.addWidget(s)
+    s.show()
+    s.setValue(50)
+    spy = QSignalSpy(s.committed)
+    ev = _wheel(qtbot, s.slider())
+    assert not ev.isAccepted()                  # passes on to the parent scroll area
+    assert s.value() == 50 and len(spy) == 0
+    assert s.slider().focusPolicy() == Qt.FocusPolicy.ClickFocus
+
+
+def test_slider_keyboard_still_commits(qtbot):
+    s = ValueSlider("PL1", "", 20, 100, 5, " W")
+    qtbot.addWidget(s)
+    s.show()
+    s.setValue(50)
+    spy = QSignalSpy(s.committed)
+    qtbot.keyClick(s.slider(), Qt.Key.Key_Right)
+    qtbot.waitUntil(lambda: len(spy) == 1)
+    assert spy[0][0] == 55
+
+
+def test_set_value_if_idle_skips_during_drag(qtbot):
+    s = ValueSlider("PL1", "", 20, 100, 5, " W")
+    qtbot.addWidget(s)
+    s.setValue(50)
+    s.slider().setSliderDown(True)
+    assert s.set_value_if_idle(80) is False and s.value() == 50
+    s.slider().setSliderDown(False)
+    assert s.set_value_if_idle(80) is True and s.value() == 80

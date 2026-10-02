@@ -52,7 +52,7 @@ class MainWindow(FramelessWindow):
         state.sensorsChanged.connect(self._refresh_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
         state.displayChanged.connect(lambda _v: self._refresh_display())
-        state.batteryLimitChanged.connect(lambda _v: self._refresh_battery())
+        state.batteryLimitChanged.connect(lambda _v: self._refresh_battery_limit())
         state.platformChanged.connect(self._on_platform)
 
     # ------------------------------------------------------------------ build
@@ -213,7 +213,7 @@ class MainWindow(FramelessWindow):
         self.sensor.update(cpu_temp=s.cpu_temp, cpu_load=s.cpu_load, gpu_state=s.gpu_state, gpu_temp=s.gpu_temp,
                            gpu_load=s.gpu_load, gpu_power_w=s.gpu_power_w, fans=s.fans_rpm, ram_pct=s.ram_pct,
                            battery_pct=s.battery_pct, battery_status=s.battery_status, on_ac=s.on_ac)
-        self._refresh_battery()
+        self._refresh_battery_text()
 
     def _pending_color(self) -> str:
         p = self.state.gfx.pending
@@ -272,10 +272,17 @@ class MainWindow(FramelessWindow):
         self.disp_header.set_value(f"Dahili panel · {strong(cur_txt)}")
 
     def _refresh_battery(self) -> None:
+        self._refresh_battery_limit()
+        self._refresh_battery_text()
+
+    def _refresh_battery_limit(self) -> None:
+        """Only on batteryLimitChanged (and initial fill); never from the 1 Hz sensor tick."""
         lim = self.state.battery_limit
         if lim is not None:
             self.bat_seg.set_current(str(lim) if lim in (60, 80, 100) else None)
-            self.bat_slider.setValue(lim)
+            self.bat_slider.set_value_if_idle(lim)
+
+    def _refresh_battery_text(self) -> None:
         s = self.state.sensors
         txt = ""
         if s is not None and s.battery_pct is not None:

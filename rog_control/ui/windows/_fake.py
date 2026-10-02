@@ -173,6 +173,8 @@ class FakeController(QObject):
 
     def set_custom_limits(self, pl1: int, pl2: int, fppt: int) -> None:
         self._rec("set_custom_limits", pl1, pl2, fppt)
+        pl2 = max(pl2, pl1)             # same clamping as the real controller
+        fppt = max(fppt, pl2)
         self._limits = (pl1, pl2, fppt)
 
     def request_gpu_mode(self, mode: str) -> None:

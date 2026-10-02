@@ -272,6 +272,13 @@ class ToggleSwitch(QWidget, AccentMixin):
             p.drawRoundedRect(tr.adjusted(-2, -2, 2, 2), 13, 13)
 
 
+class _NoWheelSlider(QSlider):
+    """QSlider that never reacts to the mouse wheel: the event goes to the parent (e.g. a scroll area)."""
+
+    def wheelEvent(self, e):
+        e.ignore()
+
+
 class ValueSlider(QWidget, AccentMixin):
     """label + sublabel | slider | value text with unit. `valueChanged` while dragging, `committed` on release/keys."""
 
@@ -300,7 +307,8 @@ class ValueSlider(QWidget, AccentMixin):
         if label_width:
             self._label_box.setFixedWidth(label_width)
         lay.addWidget(self._label_box)
-        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider = _NoWheelSlider(Qt.Orientation.Horizontal)
+        self._slider.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # no wheel focus; keys work once clicked/tabbed
         self._slider.setRange(0, (maximum - minimum) // step)
         self._slider.setCursor(Qt.CursorShape.PointingHandCursor)
         self._slider.setAccessibleName(label)
@@ -330,6 +338,16 @@ class ValueSlider(QWidget, AccentMixin):
             self._block = False
         self._refresh_text()
 
+    def is_dragging(self) -> bool:
+        return self._slider.isSliderDown()
+
+    def set_value_if_idle(self, v: int) -> bool:
+        """Programmatic update that never fights an in-progress drag. Returns True if applied."""
+        if self._slider.isSliderDown():
+            return False
+        self.setValue(v)
+        return True
+
     def set_range(self, minimum: int, maximum: int, sublabel: str | None = None) -> None:
         cur = self.value()
         self._min, self._max = minimum, maximum
@@ -351,7 +369,7 @@ class ValueSlider(QWidget, AccentMixin):
             self.valueChanged.emit(self.value())
 
     def _on_action(self, action):
-        # keyboard / wheel / page steps are discrete: commit right after the value changes
+        # keyboard / page steps are discrete: commit right after the value changes (wheel is ignored entirely)
         if not self._slider.isSliderDown():
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(0, lambda: self.committed.emit(self.value()))

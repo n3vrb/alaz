@@ -379,3 +379,100 @@ def test_secondary_window_accepts_close_while_quitting(qtbot):
         assert ev.isAccepted()            # quitting: must not block quit
     finally:
         app.setProperty("rog_quitting", False)
+
+
+# ---- review regressions -------------------------------------------------------
+def test_battery_slider_not_touched_by_sensor_tick_or_drag(env, qtbot):
+    st, ctl, settings = env
+    w = MainWindow(st, ctl, settings)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.bat_slider.value() == 80
+    w.bat_slider.setValue(60)                    # user position (not yet committed)
+    st.set_sensors(fake_sensors())               # 1 Hz tick must not reset it
+    assert w.bat_slider.value() == 60
+    w.bat_slider.slider().setSliderDown(True)
+    st.set_battery_limit(90)                     # hardware event during a drag is not applied
+    assert w.bat_slider.value() == 60
+    w.bat_slider.slider().setSliderDown(False)
+    st.set_battery_limit(95)
+    assert w.bat_slider.value() == 95
+
+
+def test_nv_sliders_only_follow_their_own_property(env, qtbot):
+    st, ctl, settings = env
+    w = FansWindow(st, ctl)
+    qtbot.addWidget(w)
+    w.nv_boost.setValue(20)                      # user dragging, not committed
+    st.set_platform_value("PanelOd", False)      # unrelated change
+    st.set_platform_value("ThrottlePolicyOnAc", 0)
+    assert w.nv_boost.value() == 20
+    st.set_platform_value("NvTempTarget", 80)
+    assert w.nv_boost.value() == 20 and w.nv_temp.value() == 80
+    w.nv_boost.slider().setSliderDown(True)
+    st.set_platform_value("NvDynamicBoost", 8)
+    assert w.nv_boost.value() == 20
+    w.nv_boost.slider().setSliderDown(False)
+    st.set_platform_value("NvDynamicBoost", 8)
+    assert w.nv_boost.value() == 8
+
+
+def test_unapplied_edits_survive_reload_and_show(env, qtbot):
+    st, ctl, settings = env
+    w = FansWindow(st, ctl)
+    qtbot.addWidget(w)
+    w.show()
+    pump()
+    orig = w.chart.points()
+    edited = list(orig)
+    edited[2] = (edited[2][0], 90)
+    w.chart.set_points(edited)
+    w.hide()
+    w.show()                                     # showEvent reloads curves
+    pump()
+    st.fanCurvesChanged.emit("balanced", [FanCurve("CPU", (0, 59, 62, 65, 68, 71, 74, 76),
+                                                    (2, 25, 38, 51, 63, 81, 99, 117), True)])
+    assert w.chart.points() == edited
+    w.fan_seg.set_current("GPU", emit=True)      # fan switch keeps the CPU edit too
+    w.fan_seg.set_current("CPU", emit=True)
+    assert w.chart.points() == edited
+    w.btn_default.click()                        # Varsayılan discards
+    assert w.chart.points() == orig
+
+
+def test_edits_cleared_once_applied_curve_comes_back(env, qtbot):
+    st, ctl, settings = env
+    w = FansWindow(st, ctl)
+    qtbot.addWidget(w)
+    w.show()
+    pts = w.chart.points()
+    edited = list(pts)
+    edited[2] = (edited[2][0], 90)
+    w.chart.set_points(edited)
+    cpu = FanCurve("CPU", tuple(t for t, _ in edited), tuple(round(p * 255 / 100) for _, p in edited), True)
+    st.fanCurvesChanged.emit("balanced", [cpu])
+    assert w.chart.points() == edited and not w._work
+
+
+def test_custom_sliders_show_clamped_values(env, qtbot):
+    st, ctl, settings = env
+    w = FansWindow(st, ctl)
+    qtbot.addWidget(w)
+    w.btn_goto_custom.click()
+    w.pl_sliders[0].setValue(100)                # PL1 above PL2(90)
+    w.pl_sliders[0].committed.emit(100)
+    assert ctl.custom_limits() == (100, 100, 110)
+    assert [s.value() for s in w.pl_sliders] == [100, 100, 110]
+
+
+def test_chart_uses_edited_profile_colour_not_active_accent(env, qtbot):
+    from rog_control.ui.windows._base import PERF_COLOR
+    st, ctl, settings = env                      # active mode: balanced
+    w = FansWindow(st, ctl)
+    qtbot.addWidget(w)
+    w.profile_btns["turbo"].click()
+    assert w.chart._accent == PERF_COLOR["turbo"] and w._accent == st.accent
+    w.profile_btns["custom"].click()
+    assert w.chart._accent == PERF_COLOR["custom"]
+    st.set_perf_mode("quiet")                    # active accent change must not recolour the chart
+    assert w.chart._accent == PERF_COLOR["custom"] and w._accent == st.accent

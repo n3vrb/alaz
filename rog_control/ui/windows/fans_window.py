@@ -91,7 +91,7 @@ class FansWindow(FramelessWindow):
         self._refresh_perf()
         state.fanCurvesChanged.connect(self._on_curves)
         state.sensorsChanged.connect(self._refresh_sensors)
-        state.platformChanged.connect(lambda _n, _v: self._refresh_platform())
+        state.platformChanged.connect(self._on_platform)
         state.perfModeChanged.connect(lambda _m: self._refresh_perf())
 
     # ------------------------------------------------------------------ build
@@ -161,8 +161,8 @@ class FansWindow(FramelessWindow):
         self.note.setMinimumWidth(10)
         bot.addWidget(self.note, 1)
         self.btn_default = make_button("Varsayılan", "secondary")
-        self.btn_apply = make_button("Uygula", "primary", self._accent, pad=16)
-        self.btn_default.clicked.connect(lambda: self.ctl.reset_fan_curves(self.edit_mode))
+        self.btn_apply = make_button("Uygula", "primary", PERF_COLOR[self.edit_mode], pad=16)
+        self.btn_default.clicked.connect(self._reset_curves)
         self.btn_apply.clicked.connect(self._apply_curve)
         bot.addWidget(self.btn_default)
         bot.addWidget(self.btn_apply)
@@ -274,38 +274,74 @@ class FansWindow(FramelessWindow):
         lay.addWidget(ap)
         lay.addStretch(1)
 
-        self.track_accent(self.chart, self.fan_seg, self.epp_seg, self.nv_boost, self.nv_temp, *self.pl_sliders)
+        # In-card controls follow the EDITED profile colour (mockup); window chrome keeps the active accent,
+        # so these are deliberately not registered with track_accent().
+        self._edit_widgets = (self.chart, self.fan_seg, self.epp_seg, self.nv_boost, self.nv_temp, *self.pl_sliders)
+        self._apply_edit_color()
+
+    def _apply_edit_color(self) -> None:
+        col = PERF_COLOR[self.edit_mode]
+        for w in self._edit_widgets:
+            w.set_accent(col)
+        self.btn_apply.setStyleSheet(button_qss(col, theme.INK, None, weight=600, pad=16))
 
     # ------------------------------------------------------------- profiles
     def _select_profile(self, mode: str, request: bool = True) -> None:
+        self._stash_edits()
         self.edit_mode = mode
         self._reset_sel = True
+        self._apply_edit_color()
         for k, b in self.profile_btns.items():
             b.set_selected(k == mode)
         self._show_curve()
         self._refresh_limits_page()
-        self._refresh_platform()
         if request:
             self.ctl.load_fan_curves(mode)
 
     def showEvent(self, e):
         super().showEvent(e)
+        # unapplied edits survive this reload (see _on_curves)
         self.ctl.load_fan_curves(self.edit_mode)
 
     def accent_applied(self, accent: str) -> None:
-        self.btn_apply.setStyleSheet(button_qss(accent, theme.INK, None, weight=600, pad=16))
+        # chrome only; in-card controls use the edited profile colour
         self._refresh_limits_page()
 
     def _refresh_perf(self) -> None:
         self._refresh_limits_page()
 
     # ------------------------------------------------------------------ curves
+    def _baseline(self, mode: str, fan: str) -> list[tuple[int, int]] | None:
+        c = self._curves.get(mode, {}).get(fan)
+        return list(zip(c.temps, c.percent())) if c is not None else None
+
+    def _stash_edits(self) -> None:
+        """Remember the chart's unapplied edits for (edit_mode, fan); drop the entry if it equals the baseline."""
+        key = (self.edit_mode, self.fan)
+        pts = self.chart.points()
+        if not pts:
+            return
+        if pts == self._baseline(*key):
+            self._work.pop(key, None)
+        else:
+            self._work[key] = pts
+
     def _on_curves(self, mode: str, curves) -> None:
+        # Keep unapplied edits: stash them against the OLD baseline first, then swap the baseline and drop
+        # only the work entries that now equal the new baseline (e.g. right after Uygula).
+        self._stash_edits()
         self._curves[mode] = {c.fan: c for c in curves}
         for k in [k for k in self._work if k[0] == mode]:
+            if self._work[k] == self._baseline(*k):
+                del self._work[k]
+        self._show_curve()
+
+    def _reset_curves(self) -> None:
+        """Varsayılan: the user explicitly discards edits for this profile."""
+        for k in [k for k in self._work if k[0] == self.edit_mode]:
             del self._work[k]
-        if mode == self.edit_mode:
-            self._show_curve()
+        self._show_curve()
+        self.ctl.reset_fan_curves(self.edit_mode)
 
     def _show_curve(self) -> None:
         c = self._curves.get(self.edit_mode, {}).get(self.fan)
@@ -325,7 +361,7 @@ class FansWindow(FramelessWindow):
         self._update_note()
 
     def _fan_changed(self, fan: str) -> None:
-        self._work[(self.edit_mode, self.fan)] = self.chart.points()
+        self._stash_edits()
         self.fan = fan
         self._reset_sel = True
         self._show_curve()
@@ -373,6 +409,7 @@ class FansWindow(FramelessWindow):
             + " border-radius:11px; padding:0 9px; font-size:11.5px; font-weight:600;")
         for s in self.pl_sliders:
             s.setEnabled(is_custom and not self.is_busy("perf"))
+        self._sync_limit_sliders()
         active = self.state.perf_mode == "custom"
         self.custom_hint.setText("Değerler bırakınca uygulanır." if active else
                                  "Özel mod etkin değil: değerler kaydedilir, Özel seçilince uygulanır.")
@@ -382,9 +419,18 @@ class FansWindow(FramelessWindow):
         self.epp_for.setText(f"{PERF_LABEL[self.edit_mode]} profili için")
         self._refresh_epp()
 
+    def _sync_limit_sliders(self) -> None:
+        get_limits = getattr(self.ctl, "custom_limits", None)
+        if not callable(get_limits):
+            return
+        for s, v in zip(self.pl_sliders, get_limits()):
+            s.set_value_if_idle(v)
+
     def _commit_limits(self) -> None:
         if self.edit_mode == "custom":
             self.ctl.set_custom_limits(*(s.value() for s in self.pl_sliders))
+            # the controller clamps (pl2>=pl1, fppt>=pl2): show what was actually stored
+            self._sync_limit_sliders()
 
     # ------------------------------------------------------------------- epp / nv / auto
     def _refresh_epp(self) -> None:
@@ -396,12 +442,28 @@ class FansWindow(FramelessWindow):
         n = next(n for k, _t, n in EPP_KEYS if k == key)
         self.ctl.set_epp(self.edit_mode, n)
 
+    def _on_platform(self, name: str, _v) -> None:
+        """Update only the widget that owns the changed property (never fight a drag on the others)."""
+        p = self.state.platform
+        if name == "NvDynamicBoost" and p.get(name) is not None:
+            self.nv_boost.set_value_if_idle(int(p[name]))
+        elif name == "NvTempTarget" and p.get(name) is not None:
+            self.nv_temp.set_value_if_idle(int(p[name]))
+        elif name in ("ThrottlePolicyOnAc", "ThrottlePolicyOnBattery"):
+            self._ac = POLICY_KEY.get(p.get("ThrottlePolicyOnAc"), self._ac)
+            self._bat = POLICY_KEY.get(p.get("ThrottlePolicyOnBattery"), self._bat)
+            self.chip_ac.set_key(self._ac)
+            self.chip_bat.set_key(self._bat)
+        elif name in EPP_PROP.values():
+            self._refresh_epp()
+        self.apply_enabled()
+
     def _refresh_platform(self) -> None:
         p = self.state.platform
         if p.get("NvDynamicBoost") is not None:
-            self.nv_boost.setValue(int(p["NvDynamicBoost"]))
+            self.nv_boost.set_value_if_idle(int(p["NvDynamicBoost"]))
         if p.get("NvTempTarget") is not None:
-            self.nv_temp.setValue(int(p["NvTempTarget"]))
+            self.nv_temp.set_value_if_idle(int(p["NvTempTarget"]))
         self.nv_boost.setEnabled(p.get("NvDynamicBoost") is not None and not self.is_busy("nv"))
         self.nv_temp.setEnabled(p.get("NvTempTarget") is not None and not self.is_busy("nv"))
         self._ac = POLICY_KEY.get(p.get("ThrottlePolicyOnAc"), self._ac)

@@ -53,6 +53,9 @@ _POWER_TO_STR = {
 K_CUSTOM_ACTIVE = "perf/custom_active"
 K_PL = ("custom/pl1", "custom/pl2", "custom/fppt")
 K_AUTO_REFRESH = "display/auto_refresh"
+PPT_PROPS = ("PptPl1Spl", "PptPl2Sppt", "PptFppt")
+# custom and turbo are the same asusd profile (PERFORMANCE): they share one set of fan curves.
+_CURVE_GROUP = {"turbo": ("turbo", "custom"), "custom": ("turbo", "custom")}
 
 
 def _clamp_limits(pl1: int, pl2: int, fppt: int) -> tuple[int, int, int]:
@@ -108,10 +111,14 @@ class Controller(QObject):
         self._policy: Profile | None = None
         self._custom_flag = settings.value(K_CUSTOM_ACTIVE, False, type=bool)
         self._auto_refresh = settings.value(K_AUTO_REFRESH, False, type=bool)
-        self._auto_for: bool | None = None   # on_ac value auto-refresh last evaluated for
+        self._auto_pending = False           # auto-refresh wants to apply once a fresh display state arrives
         self._on_ac: bool | None = None
         self._display_state: Any = None
         self._refresh_busy = False
+        # A persisted custom flag is only trusted once the firmware state confirms it (policy PERFORMANCE and the
+        # cached Ppt* values equal custom_limits()); until then the mode is derived as turbo.
+        self._startup_pending = self._custom_flag
+        self._seen: dict[str, Any] = {}      # last value seen per platform property
         self.state.set_display(DisplayView(auto=self._auto_refresh))
 
     # ------------------------------------------------------------ lifecycle
@@ -140,7 +147,7 @@ class Controller(QObject):
         self.sensors.start(1000)
 
     def _cached_platform(self) -> dict[str, Any]:
-        names = ("ThrottleThermalPolicy", "ChargeControlEndThreshold")
+        names = ("ThrottleThermalPolicy", "ChargeControlEndThreshold", *PPT_PROPS)
         out = {}
         for n in names:
             v = self.asusd.get_cached(n)
@@ -161,6 +168,11 @@ class Controller(QObject):
             QTimer.singleShot(0, lambda: self.state.emit_busy(key, False))
 
     def _on_asusd_error(self, op: str, msg: str) -> None:
+        if op.endswith("ThrottleThermalPolicy") and self._custom_flag:
+            # the policy write behind "custom" failed: custom is not in effect
+            log.warning("policy write failed; clearing custom flag")
+            self._set_custom_flag(False)
+            self._derive_mode()
         self.state.emit_message("error", f"asusd işlemi başarısız ({op}): {msg}")
 
     def _on_display_error(self, msg: str) -> None:
@@ -170,6 +182,11 @@ class Controller(QObject):
     # ------------------------------------------------------------ platform
     def _on_platform(self, name: str, value: Any) -> None:
         self.state.set_platform_value(name, value)
+        self._seen[name] = value
+        if self._startup_pending and (name == "ThrottleThermalPolicy" or name in PPT_PROPS):
+            self._resolve_startup_custom()
+            if not self._startup_pending:
+                self._derive_mode()
         if name == "ThrottleThermalPolicy":
             try:
                 policy = Profile(int(value))
@@ -185,6 +202,32 @@ class Controller(QObject):
             except (TypeError, ValueError):
                 pass
 
+    def _resolve_startup_custom(self) -> None:
+        """Decide once whether a persisted custom flag is still backed by the firmware."""
+        policy = self._seen.get("ThrottleThermalPolicy")
+        if policy is None:
+            return
+        try:
+            is_perf = int(policy) == int(Profile.PERFORMANCE)
+        except (TypeError, ValueError):
+            return
+        if not is_perf:
+            self._startup_pending = False
+            self._set_custom_flag(False)
+            return
+        ppt = [self._seen.get(n) for n in PPT_PROPS]
+        if any(v is None for v in ppt):
+            return  # wait for the remaining values
+        self._startup_pending = False
+        try:
+            same = tuple(int(v) for v in ppt) == self.custom_limits()
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            log.info("startup: persisted custom flag but Ppt %s != custom limits %s -> turbo",
+                     ppt, self.custom_limits())
+            self._set_custom_flag(False)
+
     def _set_custom_flag(self, flag: bool) -> None:
         self._custom_flag = flag
         self.settings.setValue(K_CUSTOM_ACTIVE, flag)
@@ -192,7 +235,7 @@ class Controller(QObject):
     def _derive_mode(self) -> None:
         if self._policy is None:
             return
-        if self._policy == Profile.PERFORMANCE and self._custom_flag:
+        if self._policy == Profile.PERFORMANCE and self._custom_flag and not self._startup_pending:
             mode = "custom"
         else:
             mode = _POLICY_TO_MODE[self._policy]
@@ -208,16 +251,27 @@ class Controller(QObject):
             self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
             return
         custom = mode == "custom"
-        self._set_custom_flag(custom)
-        self._derive_mode()
+        target = _MODE_TO_PROFILE[mode]
+        leaving_custom = self.state.perf_mode == "custom" or self._custom_flag
+        self._startup_pending = False
 
         def write() -> None:
-            self.asusd.set_platform("ThrottleThermalPolicy", int(_MODE_TO_PROFILE[mode]))
+            if leaving_custom and not custom and target == Profile.PERFORMANCE:
+                # Mechanism (as in G-Helper): on ASUS firmware a thermal-policy CHANGE resets PPT to the profile
+                # defaults. Policy is already PERFORMANCE while in custom, so writing it again changes nothing and
+                # the custom PPT would stay. Bounce through BALANCED first so the change really happens.
+                log.info("leaving custom for turbo: writing BALANCED then PERFORMANCE so the firmware "
+                         "resets PPT to defaults")
+                self.asusd.set_platform("ThrottleThermalPolicy", int(Profile.BALANCED))
+            self.asusd.set_platform("ThrottleThermalPolicy", int(target))
+            # Only after the policy write was issued without raising: persist/derive the flag. An asusd-side
+            # failure arrives later via error() and clears it (_on_asusd_error).
+            self._set_custom_flag(custom)
+            self._derive_mode()
             if custom:
                 self._write_limits(*self.custom_limits())
-            else:
-                log.info("left custom/policy changed: firmware returns to its own "
-                         "power limits (unverified)")
+            elif leaving_custom:
+                log.info("left custom: policy change makes the firmware restore its own power limits")
 
         self._pulse("perf", write)
 
@@ -338,7 +392,7 @@ class Controller(QObject):
         self._display_state = st
         self._publish_display()
         self._end_refresh_busy()
-        self._maybe_auto_refresh()
+        self._run_auto_refresh()
 
     def _publish_display(self) -> None:
         st = self._display_state
@@ -364,11 +418,12 @@ class Controller(QObject):
         if hz is None:
             self._auto_refresh = True
             self.settings.setValue(K_AUTO_REFRESH, True)
-            self._auto_for = None
             self._publish_display()
-            self._maybe_auto_refresh()
+            # explicit enable: apply once now (needs on_ac and a fresh display state)
+            self._request_auto_refresh()
             return
         self._auto_refresh = False
+        self._auto_pending = False
         self.settings.setValue(K_AUTO_REFRESH, False)
         self._publish_display()
         self._apply_hz(int(hz))
@@ -377,13 +432,21 @@ class Controller(QObject):
         self._begin_refresh_busy()
         self.display.set_refresh(hz)
 
-    def _maybe_auto_refresh(self) -> None:
-        if not self._auto_refresh or self._on_ac is None:
+    def _request_auto_refresh(self) -> None:
+        """Ask for a fresh display state; the rate is decided in _run_auto_refresh when it arrives."""
+        if not self._auto_refresh:
+            return
+        self._auto_pending = True
+        if self._on_ac is not None:
+            self.display.refresh()
+
+    def _run_auto_refresh(self) -> None:
+        if not (self._auto_pending and self._auto_refresh) or self._on_ac is None:
             return
         st = self._display_state
-        if st is None or not st.rates or self._auto_for == self._on_ac:
+        if st is None or not st.rates:
             return
-        self._auto_for = self._on_ac
+        self._auto_pending = False
         rates = list(st.rates)
         target = max(rates) if self._on_ac else (60 if 60 in rates else None)
         if target is None or target == st.current_hz:
@@ -396,8 +459,11 @@ class Controller(QObject):
         self.state.set_sensors(snap)
         on_ac = getattr(snap, "on_ac", None)
         if on_ac is not None:
-            self._on_ac = bool(on_ac)
-            self._maybe_auto_refresh()
+            prev, self._on_ac = self._on_ac, bool(on_ac)
+            # The first snapshot only records on_ac (no write at startup); act on a later TRANSITION, or when
+            # the user explicitly enabled auto and is still waiting for a first on_ac value.
+            if self._auto_refresh and (self._auto_pending or (prev is not None and prev != self._on_ac)):
+                self._request_auto_refresh()
         # sensors may refine the GPU power string
         cur = self.state.gfx.power
         gs = getattr(snap, "gpu_state", "unknown")
@@ -457,11 +523,16 @@ class Controller(QObject):
         def done(curves: list[FanCurve]) -> None:
             self.state.emit_busy("fan_load", False)
             if curves:
-                self.state.set_fan_curves(mode, curves)
+                self._store_curves(mode, list(curves))
             else:
                 self.state.emit_message("error", "Fan eğrileri okunamadı.")
 
         self.asusd.fetch_fan_curves(profile, done)
+
+    def _store_curves(self, mode: str, curves: list[FanCurve]) -> None:
+        keys = _CURVE_GROUP.get(mode, (mode,))
+        for key in (mode, *[k for k in keys if k != mode]):   # requested mode first
+            self.state.set_fan_curves(key, curves)
 
     def apply_fan_curve(self, mode: str, fan: str, points: list[tuple[int, int]]) -> None:
         profile = _MODE_TO_PROFILE.get(mode)
@@ -483,13 +554,22 @@ class Controller(QObject):
         if not all(0 <= t <= 255 for t in temps) or not all(0 <= p <= 100 for p in pcts):
             self.state.emit_message("error", "Fan eğrisi değerleri aralık dışında.")
             return
-        curve = FanCurve(fan.upper(), tuple(temps),
-                         tuple(round(p * 255 / 100) for p in pcts), True)
-        self._pulse("fan", lambda: self.asusd.set_fan_curve(profile, curve))
+        fan_u = fan.upper()
         cached = self.state.fan_curves.get(mode)
+        old = next((c for c in cached if c.fan.upper() == fan_u), None) if cached else None
+        # Keep the original raw pwm for every point whose percent was not edited (percent<->pwm is lossy:
+        # 2 -> 1 % -> 3). Only edited points are converted.
+        pwm = []
+        for i, p in enumerate(pcts):
+            if old is not None and len(old.pwm) == 8 and old.percent()[i] == p:
+                pwm.append(old.pwm[i])
+            else:
+                pwm.append(round(p * 255 / 100))
+        # Applying a curve intentionally ENABLES it (enabled=True): that is what the user expects from "Uygula".
+        curve = FanCurve(fan_u, tuple(temps), tuple(pwm), True)
+        self._pulse("fan", lambda: self.asusd.set_fan_curve(profile, curve))
         if cached:
-            self.state.set_fan_curves(
-                mode, [curve if c.fan.upper() == curve.fan else c for c in cached])
+            self._store_curves(mode, [curve if c.fan.upper() == fan_u else c for c in cached])
 
     def reset_fan_curves(self, mode: str) -> None:
         profile = _MODE_TO_PROFILE.get(mode)

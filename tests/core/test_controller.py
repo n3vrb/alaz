@@ -162,8 +162,14 @@ def test_mode_from_policy(tmp_path, policy, mode):
     assert e.sensors.started == 1000
 
 
+def _cache_ppt(e, vals=(60, 90, 110)):
+    for n, v in zip(("PptPl1Spl", "PptPl2Sppt", "PptFppt"), vals):
+        e.asusd.cache[n] = v
+
+
 def test_custom_persists_across_restart(tmp_path):
     e = Env(tmp_path, policy=Profile.PERFORMANCE, custom_flag=True)
+    _cache_ppt(e)
     e.ctl.start()
     assert e.state.perf_mode == "custom"
     assert e.state.accent == "#F2A93B"
@@ -489,3 +495,129 @@ def test_gpu_exit_code_from_last_exit_code(env, code, level, needle):
     env.ctl.request_gpu_mode("eco")
     lvl, text = env.msgs[-1]
     assert lvl == level and needle in text
+
+
+# ======================================================== review regressions
+def test_bug4a_leaving_custom_for_turbo_bounces_through_balanced(tmp_path):
+    e = Env(tmp_path, policy=Profile.PERFORMANCE, custom_flag=True)
+    _cache_ppt(e)
+    e.ctl.start()
+    assert e.state.perf_mode == "custom"
+    e.ctl.set_perf_mode("turbo")
+    assert e.asusd.sets == [("ThrottleThermalPolicy", 0), ("ThrottleThermalPolicy", 1)]
+    assert e.state.perf_mode == "turbo"
+    assert e.settings.value("perf/custom_active", False, type=bool) is False
+
+
+def test_bug4a_leaving_custom_for_balanced_writes_only_target(tmp_path):
+    e = Env(tmp_path, policy=Profile.PERFORMANCE, custom_flag=True)
+    _cache_ppt(e)
+    e.ctl.start()
+    e.ctl.set_perf_mode("balanced")
+    assert e.asusd.sets == [("ThrottleThermalPolicy", 0)]
+
+
+def test_bug4b_startup_custom_requires_matching_ppt(tmp_path):
+    e = Env(tmp_path, policy=Profile.PERFORMANCE, custom_flag=True)
+    _cache_ppt(e, (5, 5, 5))             # firmware changed them behind our back
+    e.ctl.start()
+    assert e.state.perf_mode == "turbo"
+    assert e.settings.value("perf/custom_active", False, type=bool) is False
+
+
+def test_bug4b_startup_custom_waits_for_ppt_values(tmp_path):
+    e = Env(tmp_path, policy=Profile.PERFORMANCE, custom_flag=True)
+    e.ctl.start()
+    assert e.state.perf_mode == "turbo"          # not confirmed yet
+    for n, v in zip(("PptPl1Spl", "PptPl2Sppt", "PptFppt"), (60, 90, 110)):
+        e.asusd.platformChanged.emit(n, v)
+    assert e.state.perf_mode == "custom"
+
+
+def test_bug4c_flag_not_set_when_policy_write_raises(env, monkeypatch):
+    env.ctl.start()
+
+    def boom(name, value):
+        raise RuntimeError("dbus down")
+    monkeypatch.setattr(env.asusd, "set_platform", boom)
+    env.ctl.set_perf_mode("custom")
+    assert env.settings.value("perf/custom_active", False, type=bool) is False
+    assert env.state.perf_mode == "balanced"
+
+
+def test_bug4c_asusd_error_clears_custom_flag(env):
+    env.ctl.start()
+    env.ctl.set_perf_mode("custom")
+    assert env.state.perf_mode == "custom"
+    env.asusd.error.emit("set_platform:ThrottleThermalPolicy", "denied")
+    assert env.settings.value("perf/custom_active", False, type=bool) is False
+    assert env.state.perf_mode == "turbo"        # policy is PERFORMANCE, custom no longer claimed
+
+
+def test_bug5_persisted_auto_refresh_does_not_write_at_startup(tmp_path):
+    e = Env(tmp_path, policy=Profile.BALANCED)
+    e.settings.setValue("display/auto_refresh", True)
+    e = Env(tmp_path, policy=Profile.BALANCED)
+    e.ctl.start()
+    e.sensors.updated.emit(SensorSnapshot(on_ac=True))     # first snapshot only records
+    assert e.display.sets == []
+    e.sensors.updated.emit(SensorSnapshot(on_ac=True))
+    assert e.display.sets == []
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))    # real transition
+    assert e.display.sets == [60] or e.display.sets == []  # 60 is current in DS -> nothing to write
+    e.display.st = DS(current_hz=144)
+    e.sensors.updated.emit(SensorSnapshot(on_ac=True))
+    assert e.display.sets[-1] == 240
+
+
+def test_bug5_auto_uses_fresh_display_state(env, monkeypatch):
+    env.ctl.start()                                   # cached display state: 60 Hz
+    env.ctl.set_refresh(None)
+    env.sensors.updated.emit(SensorSnapshot(on_ac=False))
+    env.display.sets.clear()
+    fresh = DS(current_hz=240)                        # panel changed behind our back, no signal yet
+    monkeypatch.setattr(env.display, "refresh", lambda: env.display.changed.emit(fresh))
+    env.sensors.updated.emit(SensorSnapshot(on_ac=True))   # target 240 == fresh current -> no write
+    assert env.display.sets == []
+
+
+def test_bug6_shared_performance_curves_cache(env):
+    env.asusd.curves = [FanCurve("CPU", (30,) * 8, (0,) * 8, True)]
+    env.ctl.start()
+    got = []
+    env.state.fanCurvesChanged.connect(lambda m, c: got.append(m))
+    env.ctl.load_fan_curves("custom")
+    assert set(got) == {"custom", "turbo"}
+    assert env.state.fan_curves["turbo"] == env.state.fan_curves["custom"]
+    got.clear()
+    env.ctl.apply_fan_curve("turbo", "CPU", points([0, 10, 20, 40, 50, 70, 90, 100]))
+    assert set(got) == {"custom", "turbo"}
+    assert env.state.fan_curves["custom"][0].pwm == env.state.fan_curves["turbo"][0].pwm
+    got.clear()
+    env.ctl.load_fan_curves("quiet")
+    assert got == ["quiet"]
+
+
+def test_bug3_untouched_points_keep_raw_pwm(env):
+    pwm = (2, 25, 38, 51, 63, 81, 99, 117)
+    temps = (30, 40, 50, 60, 70, 80, 90, 100)
+    env.asusd.curves = [FanCurve("CPU", temps, pwm, False)]
+    env.ctl.start()
+    env.ctl.load_fan_curves("balanced")
+    pts = list(zip(temps, FanCurve("CPU", temps, pwm, False).percent()))
+    env.ctl.apply_fan_curve("balanced", "CPU", pts)
+    curve = env.asusd.calls[-1][2]
+    assert curve.pwm == pwm and curve.temps == temps
+    assert curve.enabled is True                    # applying intentionally enables the curve
+    # edit one point only
+    pts2 = list(pts)
+    pts2[3] = (pts2[3][0], 60)
+    env.ctl.apply_fan_curve("balanced", "CPU", pts2)
+    c2 = env.asusd.calls[-1][2]
+    assert c2.pwm[:3] == pwm[:3] and c2.pwm[4:] == pwm[4:] and c2.pwm[3] == round(60 * 255 / 100)
+
+
+def test_bug7_set_custom_limits_clamps_and_reports(env):
+    env.ctl.start()
+    env.ctl.set_custom_limits(100, 80, 90)
+    assert env.ctl.custom_limits() == (100, 100, 100)
