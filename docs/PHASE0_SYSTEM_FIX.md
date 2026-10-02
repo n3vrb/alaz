@@ -64,33 +64,45 @@ Seçenek B: ppd kalsın, uygulama ppd'yi tek kaynak olarak kullansın (daha az �
 ## Adım 5 — Küçük temizlik
 - Çekirdek satırındaki tanınmayan `nvidia.NVreg_EnableBacklightHandler=0` kaldırılabilir (zararsız).
 
-## Sonuçlar (2026-10-02 akşam)
+## Sonuçlar (2026-10-02 akşam) — son durum
 
-- Adım 1–2 uygulandı: sürücü 580.178 hizalı (RTX 5070 Laptop), 570/dkms-580 artıkları silindi,
-  supergfxd `hotplug_type: Asus` + `always_reboot: true`, power-profiles-daemon masked.
-- **UYARI — canlı geçiş yasak:** `supergfxctl -m Integrated` oturum açıkken çalıştırıldığında
-  `always_reboot`'a rağmen supergfxd canlı geçiş yaptı: gnome-shell ve Xwayland'i ÖLDÜRDÜ
-  (oturum çöktü), sonra rmmod hatası yüzünden Hybrid'e geri döndü ve modprobe/Vulkan ICD
-  dosyalarını Integrated halinde bıraktı (`systemctl restart supergfxd` düzeltti).
-- **Çalışan yöntem — açılışta geçiş:** `/etc/supergfxd.conf` içinde `"mode"` değiştir + reboot.
-  supergfxd `Before=display-manager.service` olduğundan geçişi GDM'den önce, kimse kartı
-  tutmazken yapar. Eco testi: mode Integrated, status off, dgpu_disable=1, lspci'de NVIDIA yok.
-  DÜZELTME: ilk Eco açılışında aslında "fallen off the bus" hataları VARDI (0.7 sn, initramfs'teki
-  nvidia modülü kapalı kartı yokluyordu). Çözüm: /etc/modprobe.d/rog-control-nvidia-noauto.conf
-  (blacklist nvidia*), initramfs-tools/modules içindeki geçersiz `framebuffer-nvidia` satırı
-  yorumlandı, `update-initramfs -u -k all`. Sonrasında Eco açılışı TEMİZ ("No NVIDIA GPU found"
-  dışında satır yok); Hybrid'de sürücüyü supergfxd adıyla yüklüyor (3.6 sn) — çalışıyor.
-- **Canlı Eco→Hybrid de yasak:** `supergfxctl -m Hybrid` canlıda kartı geri getirdi ve sürücü
-  yüklendi, ama Wayland gnome-shell yeni GPU'yu hotplug ederken kilitlendi ("Failed to hotplug
-  secondary gpu", EGL hataları) → güç düğmesiyle kapatma gerekti. Sonuç: bu sistemde GPU iki
-  yönde de canlı eklenip çıkarılamaz.
-- Açılışta Eco'dan çıkış da kendiliğinden olmaz: supergfxd `asus_boot_safety_check`,
-  dgpu_disable=1 görünce modu Integrated'a zorlar.
-- Uygulama tasarımı (polkit yardımcısı, `supergfxctl -m` ASLA canlı çağrılmaz):
-  - Eco'ya giriş: config "mode"=Integrated → yeniden başlat. (test edildi, temiz)
-  - Eco'dan çıkış: `systemctl stop supergfxd` → config "mode"=Hybrid → dgpu_disable=0 yaz
-    (noauto blacklist sayesinde sürücü yüklenmez, gnome-shell'in yakalayacağı DRM aygıtı oluşmaz)
-    → yeniden başlat. (HENÜZ TEST EDİLMEDİ)
-- Açık konu: Eco'da boşta ~22 W tüketim yüksek. Şüpheliler: `pcie_aspm=off` çekirdek
-  parametresi, 240 Hz panel. Güç optimizasyonunda incelenecek.
-- Sıradaki test: yukarıdaki Eco'dan çıkış prosedürü.
+### Kalıcı olarak uygulanan değişiklikler (çalışıyor)
+- Sürücü 580.178 hizalı (RTX 5070 Laptop); `nvidia-driver-570-open` silindi, `nvidia-dkms-580` purge.
+- `/etc/supergfxd.conf`: `hotplug_type: "Asus"`, `always_reboot: true` (yedek: `.bak`).
+- `power-profiles-daemon` masked (asusd ile çakışıyordu).
+- **`gpu-manager.service` masked** ve `/etc/gdm3/PrimeOff/Default` → `Default.disabled`.
+  Sebep: açılışta gpu-manager NVIDIA sürücüsünü supergfxd'nin kontrolünden hemen sonra yükledi;
+  supergfxd kartı kaldırırken `nv_pci_remove` sonsuz döngüye girdi (öldürülemeyen süreç,
+  ikinci gpu-manager kilit bekledi) → zorla kapatma gerekti.
+- `/etc/initramfs-tools/modules` içindeki geçersiz `framebuffer-nvidia` satırı yorumlandı (zararsız).
+
+### Denenip GERİ ALINAN değişiklik
+- `/etc/modprobe.d/rog-control-nvidia-noauto.conf` (nvidia otomatik yükleme kara listesi):
+  Eco açılışındaki "fallen off the bus" uyarılarını giderdi AMA Hybrid'de sürücü 3.6 sn'de
+  (supergfxd) yükleniyor, supergfxd `Type=dbus` olduğu için GDM beklemeden başlıyor → GDM Xorg
+  "Failed to create pixmap" ile çöktü, 4 açılış siyah ekran. Dosya silindi + initramfs yenilendi;
+  sürücü yine 0.7 sn'de yükleniyor, Hybrid açılış normal.
+- Ders: açılış sırasını değiştiren her değişiklik GDM ile yarış yaratabilir; önce riski söyle,
+  geri dönüş yolunu hazırla.
+
+### GPU geçiş bulguları
+- `supergfxctl -m` CANLI kullanılamaz, iki yönde de:
+  - Eco'ya canlı giriş: gnome-shell + Xwayland öldürüldü (oturum çöktü).
+  - Eco'dan canlı çıkış: Wayland gnome-shell yeni GPU'yu hotplug ederken kilitlendi.
+- Eco'ya giriş — açılışta: config `"mode": "Integrated"` + reboot → ÇALIŞIYOR (dgpu_disable=1,
+  kart PCI'dan kalkar). Kozmetik: açılışın ilk saniyesinde initramfs'teki nvidia modülü kapalı
+  kartı yoklayıp "fallen off the bus" uyarısı basar; Eco yine çalışır. (Ayrı, güvenli bir çözüm
+  sonra aranacak — açılış sırasını bozmadan.)
+- Açılışta Eco'dan çıkış kendiliğinden olmaz: supergfxd `asus_boot_safety_check`, dgpu_disable=1
+  görünce modu Integrated'a zorlar.
+- Eco'dan çıkış prosedürü (stop supergfxd → config Hybrid → dgpu_disable=0 → reboot):
+  kara liste varken canlı kısmı sorunsuzdu, ama sonraki açılış kara liste yüzünden siyah ekran
+  verdi. Kara liste OLMADAN bu prosedür: dgpu_disable=0 yazınca sürücü otomatik yüklenir →
+  gnome-shell hotplug kilitlenmesi riski. Çözüm adayı: yalnız o an için geçici bir modprobe
+  kara listesi (initramfs'e GİRMEYEN) yaz → dgpu_disable=0 → geçici dosyayı sil → reboot.
+  HENÜZ TEST EDİLMEDİ.
+
+### Açık konular
+- Eco'da boşta ~22–24 W tüketim yüksek (dGPU kapalıyken). Şüpheliler: `pcie_aspm=off` çekirdek
+  parametresi, 240 Hz panel, parlaklık. Güç optimizasyonunda.
+- `nvidia-powerd` kurulu değil (Dynamic Boost buna bağlı) — güç profillerinde bakılacak.
