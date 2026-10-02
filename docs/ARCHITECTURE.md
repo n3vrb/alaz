@@ -165,3 +165,68 @@ Widget'lar (her biri bağımsız, backend import ETMEZ): `ModeTile`, `ModeTileRo
   **sadece config'i yazar ve çıkış kodu 3 + açıklama ile "Eco'dan çıkış henüz desteklenmiyor" döner**; sysfs'e yazmaz.
 - Asla `supergfxctl -m`, `systemctl`, reboot çağırmaz. Girdi doğrulaması sıkı; bilinmeyen argüman → çıkış 2.
 `org.rogcontrol.gfx.policy`: `auth_admin_keep`. `install.sh`: helper'ı `/usr/local/libexec/`, policy'yi `/usr/share/polkit-1/actions/` altına kopyalar (çalıştırmak kullanıcıya kalır).
+
+---
+
+## Dalga 2 sözleşmesi — `core/` ↔ `ui/windows/`
+
+Dalga 1'in gerçek API'leri kaynak koddadır (`rog_control/backend/*.py`, `rog_control/ui/widgets/*.py`); sözleşmeden
+sapmalar orada belgelendi (ör. `AsusdClient(bus=None, parent=None)`, `availableChanged`, `Typed/Variant`). Okuyun.
+
+### Uygulama modu kavramı
+`PerfMode` (str): `"quiet" | "balanced" | "turbo" | "custom"` → UI: Sessiz / Dengeli / Turbo / Özel.
+- quiet/balanced/turbo = asusd `ThrottleThermalPolicy` QUIET/BALANCED/PERFORMANCE.
+- custom ("Özel") = uygulama modu: policy PERFORMANCE + kullanıcının PL1/PL2/FPPT değerleri (`PptPl1Spl/PptPl2Sppt/PptFppt`)
+  + Performance profilinin fan eğrileri. Özel'den çıkınca sadece policy yazılır (firmware kendi limitlerine döner — doğrulanmadı,
+  loglanır). Özel değerleri QSettings'te saklanır (varsayılan 60/90/110 W, aralık 15–170).
+- Dışarıdan (Fn tuşu) policy değişirse: aktif mod policy'den türetilir (custom bilgisi kaybolur → balanced/quiet/turbo).
+
+### `core/state.py` — `class AppState(QObject)` (salt veri + sinyaller, backend import ETMEZ)
+```python
+perfModeChanged = pyqtSignal(str)                 # PerfMode
+accentChanged = pyqtSignal(str)                   # hex, perfMode'dan türetilir
+sensorsChanged = pyqtSignal(object)               # backend.sensors.SensorSnapshot
+gfxChanged = pyqtSignal(object)                   # GfxView (aşağıda)
+displayChanged = pyqtSignal(object)               # DisplayView
+batteryLimitChanged = pyqtSignal(int)
+platformChanged = pyqtSignal(str, object)         # ham asusd özellik değişimi (EPP, NV, OnAc/OnBattery …)
+fanCurvesChanged = pyqtSignal(str, object)        # (perfMode, list[FanCurve])
+auraChanged = pyqtSignal(object)                  # AuraView(brightness:int|None, color:(r,g,b)|None)
+busyChanged = pyqtSignal(str, bool)               # (işlem anahtarı, meşgul mü) — UI butonları kilitlemek için
+message = pyqtSignal(str, str)                    # (seviye "info"|"warn"|"error", Türkçe metin) — toast/banner
+# + aynı adlı okunabilir özellikler: perf_mode, accent, sensors, gfx, display, battery_limit, platform(dict), aura
+@dataclass GfxView: active: str|None ("eco"|"standard"|"ultimate"), boot: str|None (config'deki), pending: str|None,
+                    power: str ("sleep"|"active"|"off"|"unknown"), dgpu_disabled: bool|None, mux_direct: bool|None,
+                    can_eco_exit: bool  # şimdilik False
+@dataclass DisplayView: connector: str|None, current_hz: int|None, rates: list[int], auto: bool
+```
+### `core/controller.py` — `class Controller(QObject)` (tek yazma yolu; UI yalnızca bunu çağırır)
+```python
+def __init__(self, state: AppState, asusd, gfx, sensors, display, settings: QSettings)
+def start(self)                                   # refresh'leri başlat, sinyalleri bağla, sensörü 1 sn başlat
+def set_perf_mode(self, mode: str)
+def set_custom_limits(self, pl1: int, pl2: int, fppt: int)   # custom aktifse hemen yazar
+def request_gpu_mode(self, mode: str)             # "eco"|"standard" — helper (pkexec) ile BOOT modu; sonuç → state.gfx.pending + message
+def cancel_gpu_pending(self)                      # boot config'i aktif moda geri yazar (helper)
+def reboot_now(self)                              # logind org.freedesktop.login1.Manager.Reboot(false) — UI onay diyaloğundan SONRA çağırır
+def set_refresh(self, hz: int | None)             # None = Otomatik (prizde en yüksek, pilde 60; on_ac değişince uygular)
+def set_panel_od(self, on: bool)
+def set_battery_limit(self, pct: int)             # 20..100
+def load_fan_curves(self, mode: str)              # → state.fanCurvesChanged
+def apply_fan_curve(self, mode: str, fan: str, points: list[tuple[int,int]])  # % → pwm, enabled=True
+def reset_fan_curves(self, mode: str)
+def set_epp(self, mode: str, epp: int)            # Throttle{Quiet,Balanced,Performance}Epp (custom → Performance)
+def set_nv_boost(self, w: int); def set_nv_temp_target(self, c: int)
+def set_auto_profile(self, on_ac: str, on_battery: str)   # ThrottlePolicyOnAc/OnBattery + Change*=true
+def set_kbd_brightness(self, level: int); def set_kbd_color(self, rgb: tuple[int,int,int])
+```
+Kurallar: her yazma `busyChanged(key, True/False)` ile sarılır; hata → `message("error", Türkçe açıklama)`; hiçbir çağrı bloklamaz;
+GPU için sadece `gfx.request_boot_mode` (helper) — helper çıkış kodu 3 → "Eco'dan çıkış henüz desteklenmiyor…" mesajı;
+`ultimate` ve `optimize` şimdilik desteklenmez (UI devre dışı + tooltip).
+
+### `ui/windows/` (Dalga 2-F)
+`MainWindow` (V2Main), `FansWindow` (V2Fans), `KeyboardWindow` (parlaklık Segmented + 16 renk swatch + uygula),
+`SettingsWindow` (oturumda başlat → `~/.config/autostart/rog-control.desktop`, tepside küçült, bildirimler),
+`MiniWindow` + `Tray` (V2MiniTray). Pencereler YALNIZCA `AppState` okur/dinler ve `Controller` çağırır.
+`app.py`: QApplication, `theme.apply`, backend nesneleri, state, controller, pencereler, tray; tek örnek (QLocalServer ile ikinci
+başlatma mevcut pencereyi öne getirir); `--minimized`. `__main__.py`: `main()`.
