@@ -335,3 +335,16 @@ def test_set_value_if_idle_skips_during_drag(qtbot):
     assert s.set_value_if_idle(80) is False and s.value() == 50
     s.slider().setSliderDown(False)
     assert s.set_value_if_idle(80) is True and s.value() == 80
+
+
+def test_sensor_panel_power_text(qtbot):
+    sp = SensorPanel()
+    qtbot.addWidget(sp)
+    sp.update(battery_status="Discharging", on_ac=False, battery_power_w=26.4)
+    assert sp._ac.text().startswith("Pilde") and "Sistem 26 W" in sp._ac.text()
+    sp.update(battery_status="Charging", on_ac=True, battery_power_w=65.2)
+    assert "Prizde" in sp._ac.text() and "Şarj +65 W" in sp._ac.text()
+    sp.update(battery_status="Full", on_ac=True, battery_power_w=0.0)
+    assert sp._ac.text() == "Prizde"
+    sp.update(battery_status="Discharging", on_ac=False, battery_power_w=None)
+    assert sp._ac.text() == "Pilde"

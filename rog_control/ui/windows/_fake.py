@@ -64,7 +64,8 @@ def fake_curves(mode: str) -> list[FanCurve]:
 def fake_sensors(**kw) -> SensorSnapshot:
     base = dict(cpu_temp=48.0, cpu_load=12.0, ram_pct=38.0, gpu_state="sleep", gpu_temp=None, gpu_load=None,
                 gpu_power_w=0.0, fans_rpm={"cpu": 2300, "gpu": 2100, "mid": 3800}, battery_pct=90.0,
-                battery_status="Full", on_ac=True, battery_power_w=None)
+                battery_status="Full", on_ac=True, battery_power_w=None)  # AC+Full: no watts
+    # battery case: battery_status="Discharging", on_ac=False, battery_power_w=26.4; AC charging: "Charging", True, 65.2
     base.update(kw)
     return SensorSnapshot(**base)
 

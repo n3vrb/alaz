@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidg
 
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import AccentMixin, IconButton, make_button
+from rog_control.ui.power_text import PowerSmoother, power_text, source_text
 from rog_control.ui.widgets.icons import draw_icon, icon_pixmap
 
 DASH = "—"
@@ -260,6 +261,7 @@ class SensorPanel(QWidget, AccentMixin):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._cpu_model = ""
+        self._smoother = PowerSmoother(5)
         root = QVBoxLayout(self)
         root.setContentsMargins(1, 1, 1, 1)
         root.setSpacing(0)
@@ -286,6 +288,7 @@ class SensorPanel(QWidget, AccentMixin):
             w.setStyleSheet(f"font-size:12px; color:{theme.TEXT2}; background:transparent")
         self._ac_icon = _IconLabel("plug", theme.TEXT2, 13, 2.0)
         self._ac = QLabel()
+        self._ac.setTextFormat(Qt.TextFormat.RichText)
         self._ac.setStyleSheet(f"font-size:12px; color:{theme.TEXT2}; background:transparent")
         sl.addWidget(self._ram)
         sl.addWidget(self._bat)
@@ -296,7 +299,7 @@ class SensorPanel(QWidget, AccentMixin):
         root.addWidget(strip)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.update()  # no args -> repaint
-        self._apply(None, None, None, None, None, None, None, None, None, None, None)
+        self._apply(None, None, None, None, None, None, None, None, None, None, None, None)
 
     def set_cpu_model(self, model: str) -> None:
         self._cpu_model = model
@@ -312,12 +315,12 @@ class SensorPanel(QWidget, AccentMixin):
 
     @staticmethod
     def _bind(cpu_temp=None, cpu_load=None, gpu_state=None, gpu_temp=None, gpu_load=None, gpu_power_w=None,
-              fans=None, ram_pct=None, battery_pct=None, battery_status=None, on_ac=None):
+              fans=None, ram_pct=None, battery_pct=None, battery_status=None, on_ac=None, battery_power_w=None):
         return (cpu_temp, cpu_load, gpu_state, gpu_temp, gpu_load, gpu_power_w, fans, ram_pct, battery_pct,
-                battery_status, on_ac)
+                battery_status, on_ac, battery_power_w)
 
     def _apply(self, cpu_temp, cpu_load, gpu_state, gpu_temp, gpu_load, gpu_power_w, fans, ram_pct, battery_pct,
-               battery_status, on_ac) -> None:
+               battery_status, on_ac, battery_power_w=None) -> None:
         a = self._accent
         # CPU
         self._cpu.set_value(DASH if cpu_temp is None else f"{cpu_temp:.0f}", "" if cpu_temp is None else "°C")
@@ -360,7 +363,9 @@ class SensorPanel(QWidget, AccentMixin):
         self._bat.setText(pil)
         self._ac_icon.setVisible(on_ac is not None)
         self._ac_icon.set_icon("plug" if on_ac else "battery")
-        self._ac.setText("" if on_ac is None else ("Prizde" if on_ac else "Pilde"))
+        watts = self._smoother.push(battery_power_w, battery_status)
+        src, ptxt = source_text(on_ac), power_text(watts, battery_status)
+        self._ac.setText(" · ".join(p for p in (src, strong_(ptxt) if ptxt else None) if p))
         self._last = (cpu_temp, cpu_load, gpu_state)
 
     def _accent_changed(self) -> None:

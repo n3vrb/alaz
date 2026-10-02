@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 from rog_control.ui import theme
+from rog_control.ui.power_text import PowerSmoother, power_text
 from rog_control.ui.widgets._common import IconButton
 from rog_control.ui.windows._base import (GPU_LABEL, PERF_COLOR, PERF_KEYS, PERF_LABEL, ChoiceButton, Dot,
                                           FramelessWindow, fmt_num, label, request_perf)
@@ -27,10 +28,13 @@ class MiniWindow(FramelessWindow):
         self.dot = Dot(self._accent, 8)
         self.perf_lbl = label("", 13, 700)
         self.gpu_lbl = label("", 12, 400, theme.TEXT3)
+        self.pwr_lbl = label("", 12, 600, theme.TEXT2)
+        self._smoother = PowerSmoother(5)
         tb.lay.addWidget(self.dot)
         tb.lay.addWidget(self.perf_lbl)
         tb.lay.addWidget(self.gpu_lbl)
         tb.lay.addStretch(1)
+        tb.lay.addWidget(self.pwr_lbl)
         ex = IconButton("expand", (30, 28), 14, theme.TEXT2, 2.0, "Tam pencereye dön")
         ex.clicked.connect(self.expandRequested)
         tb.lay.addWidget(ex)
@@ -84,6 +88,8 @@ class MiniWindow(FramelessWindow):
     def _refresh_sensors(self, s) -> None:
         if s is None:
             return
+        w = self._smoother.push(getattr(s, "battery_power_w", None), s.battery_status)
+        self.pwr_lbl.setText(power_text(w, s.battery_status) or ("Prizde" if s.on_ac else ""))
         unit = lambda txt: f'<span style="font-size:12px; color:{theme.TEXT2}; font-weight:400"> {txt}</span>'  # noqa: E731
         self.vals["CPU"].setText(f"{fmt_num(s.cpu_temp)}°" + unit(f"{fmt_num(s.cpu_load)}%"))
         gpu = {"sleep": "Uyku", "off": "Kapalı", "unknown": "—"}.get(s.gpu_state)

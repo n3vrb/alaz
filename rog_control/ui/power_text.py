@@ -1,0 +1,55 @@
+"""Live power-draw text: one pure formatter plus a tiny moving-average smoother.
+
+Discharging -> whole-system draw ("Sistem 26 W"); charging -> battery charge power ("Şarj +65 W");
+anything else (full / not charging / unknown) -> no watts. Never invents a value.
+"""
+from __future__ import annotations
+
+from collections import deque
+
+
+def power_kind(status: str | None, watts: float | None) -> str | None:
+    """'system' (discharging), 'charge' (charging) or None when no watts should be shown."""
+    if watts is None:
+        return None
+    if status == "Discharging":
+        return "system"
+    if status == "Charging":
+        return "charge"
+    return None
+
+
+def power_text(watts: float | None, status: str | None) -> str | None:
+    """'Sistem 26 W' / 'Şarj +65 W' / None."""
+    kind = power_kind(status, watts)
+    if kind == "system":
+        return f"Sistem {watts:.0f} W"
+    if kind == "charge":
+        return f"Şarj +{watts:.0f} W"
+    return None
+
+
+def source_text(on_ac: bool | None) -> str | None:
+    return None if on_ac is None else ("Prizde" if on_ac else "Pilde")
+
+
+def power_line(watts: float | None, status: str | None, on_ac: bool | None, sep: str = " · ") -> str:
+    """'Pilde · Sistem 26 W' / 'Prizde · Şarj +65 W' / 'Prizde' / '' (unknown)."""
+    return sep.join(p for p in (source_text(on_ac), power_text(watts, status)) if p)
+
+
+class PowerSmoother:
+    """Moving average over the last `n` samples; resets when the battery status changes."""
+
+    def __init__(self, n: int = 5):
+        self._buf: deque[float] = deque(maxlen=n)
+        self._status: str | None = None
+
+    def push(self, watts: float | None, status: str | None) -> float | None:
+        if status != self._status:
+            self._buf.clear()
+            self._status = status
+        if watts is None:
+            return None
+        self._buf.append(watts)
+        return sum(self._buf) / len(self._buf)

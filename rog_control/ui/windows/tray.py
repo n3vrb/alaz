@@ -8,6 +8,7 @@ from PyQt6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from rog_control.ui import theme
+from rog_control.ui.power_text import PowerSmoother, power_text
 from rog_control.ui.widgets.icons import draw_icon
 from rog_control.ui.windows import dialogs
 from rog_control.ui.windows._base import (GPU_LABEL, PERF_KEYS, PERF_LABEL, fmt_num, request_perf,
@@ -39,6 +40,8 @@ class Tray(QObject):
     def __init__(self, state, controller, settings, parent: QObject | None = None):
         super().__init__(parent)
         self.state, self.ctl, self.settings = state, controller, settings
+        self._power = PowerSmoother(5)
+        self._power_w: float | None = None
         self.icon = QSystemTrayIcon(make_icon(state.accent), self)
         self.menu = QMenu()
         self.menu.setStyleSheet(
@@ -52,7 +55,7 @@ class Tray(QObject):
         self.icon.activated.connect(self._activated)
         state.perfModeChanged.connect(self._on_perf)
         state.accentChanged.connect(lambda a: self.icon.setIcon(make_icon(a)))
-        state.sensorsChanged.connect(lambda _s: self._refresh_info())
+        state.sensorsChanged.connect(self._on_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
         self._refresh_perf()
         self._refresh_gfx()
@@ -127,6 +130,11 @@ class Tray(QObject):
         for k, a in self.gpu_actions.items():
             a.setChecked(k == g)
 
+    def _on_sensors(self, s) -> None:
+        if s is not None:
+            self._power_w = self._power.push(getattr(s, "battery_power_w", None), s.battery_status)
+        self._refresh_info()
+
     def _refresh_info(self) -> None:
         s = self.state.sensors
         mode = PERF_LABEL.get(self.state.perf_mode, "")
@@ -140,7 +148,9 @@ class Tray(QObject):
             bat = f" · Pil {s.battery_pct:.0f} %" + (f" {BAT_STATUS.get(s.battery_status or '', '')}" if s.battery_status else "")
         self.info.setText(f"CPU {fmt_num(s.cpu_temp)} °C · Fan {fmt_num(rpm)} rpm{bat}")
         gpu = {"sleep": "Uyku", "off": "Kapalı"}.get(s.gpu_state, f"{fmt_num(s.gpu_temp)} °C")
-        self.icon.setToolTip(f"ROG Control — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm")
+        tip = f"ROG Control — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm"
+        ptxt = power_text(self._power_w, s.battery_status)
+        self.icon.setToolTip(tip + (f"\nGüç: {ptxt}" if ptxt else ""))
 
     def _on_perf(self, mode: str) -> None:
         self._refresh_perf()
