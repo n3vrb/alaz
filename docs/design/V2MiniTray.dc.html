@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>ROG Control v2 — Mini mod ve tepsi menüsü</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font-family:inherit}
+button:hover{filter:brightness(1.12)}
+button:focus-visible{outline:2px solid #ECEEF3;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 760px; height: 480px; box-sizing: border-box; padding: 32px; background: #1B1D22; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #ECEEF3; display: flex; gap: 48px; align-items: flex-start">
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; color: #8F96A3; letter-spacing: 0.06em">MİNİ MOD · her zaman üstte</span>
+<div style="width: 340px; box-sizing: border-box; background: #0E0F13; border: 1px solid #2A2E38; border-radius: 12px; overflow: hidden">
+<div style="height: 3px; background: {{accent}}"></div>
+<div style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px">
+<span style="width: 8px; height: 8px; border-radius: 4px; background: {{accent}}"></span>
+<span style="font-size: 13px; font-weight: 700">{{perf}}</span>
+<span style="font-size: 12px; color: #8F96A3">· GPU Standart</span>
+<div style="flex-grow: 1"></div>
+<button aria-label="Tam pencereye dön" style="width: 30px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: #A3A9B6; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 2px 12px 10px 12px; gap: 8px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: #8F96A3">CPU</span><span style="font-size: 20px; font-weight: 600">48°<span style="font-size: 12px; color: #A3A9B6; font-weight: 400"> 12%</span></span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: #8F96A3">GPU</span><span style="font-size: 20px; font-weight: 600">Uyku</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: #8F96A3">FAN</span><span style="font-size: 20px; font-weight: 600">2300<span style="font-size: 12px; color: #A3A9B6; font-weight: 400"> rpm</span></span></div>
+</div>
+<div style="display: flex; gap: 6px; padding: 0 12px 12px 12px">
+<sc-for list="{{modes}}" as="item" hint-placeholder-count="4">
+<button onClick="{{item.pick}}" aria-pressed="{{item.sel}}" style="{{item.style}}">{{item.label}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; color: #8F96A3; letter-spacing: 0.06em">TEPSİ MENÜSÜ</span>
+<div style="width: 290px; box-sizing: border-box; background: #16181E; border: 1px solid #2A2E38; border-radius: 12px; padding: 6px; display: flex; flex-direction: column">
+<div style="padding: 8px 10px 10px 10px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #23262E; margin-bottom: 4px">
+<span style="font-size: 13px; font-weight: 700">ROG Control</span>
+<span style="font-size: 12px; color: #A3A9B6">CPU 48 °C · Fan 2300 rpm · Pil 90 % Dolu</span>
+</div>
+<span style="padding: 6px 10px 4px 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: #8F96A3">PERFORMANS</span>
+<sc-for list="{{rows}}" as="item" hint-placeholder-count="4">
+<button onClick="{{item.pick}}" role="menuitemradio" aria-checked="{{item.sel}}" style="{{item.style}}"><span style="{{item.dot}}"></span><span style="flex-grow: 1; text-align: left">{{item.label}}</span><sc-if value="{{item.sel}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ECEEF3" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></sc-if></button>
+</sc-for>
+<div style="height: 1px; background: #23262E; margin: 4px 0"></div>
+<span style="padding: 6px 10px 4px 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; color: #8F96A3">GPU MODU</span>
+<button role="menuitemradio" aria-checked="true" style="height: 32px; border: 0; border-radius: 7px; background: transparent; color: #ECEEF3; font-size: 13px; display: flex; align-items: center; gap: 10px; padding: 0 10px; cursor: pointer"><span style="flex-grow: 1; text-align: left">Standart</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ECEEF3" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></button>
+<button role="menuitemradio" aria-checked="false" style="height: 32px; border: 0; border-radius: 7px; background: transparent; color: #ECEEF3; font-size: 13px; display: flex; align-items: center; gap: 10px; padding: 0 10px; cursor: pointer"><span style="flex-grow: 1; text-align: left">Eco</span><span style="font-size: 11px; color: #8F96A3">yeniden başlatma</span></button>
+<div style="height: 1px; background: #23262E; margin: 4px 0"></div>
+<button style="height: 32px; border: 0; border-radius: 7px; background: transparent; color: #ECEEF3; font-size: 13px; text-align: left; padding: 0 10px; cursor: pointer">Pencereyi aç</button>
+<button style="height: 32px; border: 0; border-radius: 7px; background: transparent; color: #ECEEF3; font-size: 13px; text-align: left; padding: 0 10px; cursor: pointer">Mini mod</button>
+<button style="height: 32px; border: 0; border-radius: 7px; background: transparent; color: #ECEEF3; font-size: 13px; text-align: left; padding: 0 10px; cursor: pointer">Çıkış</button>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":480}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var self = this;
+    var st = this.state || {};
+    var perf = st.perf || 'Dengeli';
+    var INK = '#0B0C0F';
+    var COL = { 'Sessiz': '#34C08A', 'Dengeli': '#4C8DFF', 'Turbo': '#FF5A5F', 'Özel': '#F2A93B' };
+    var names = ['Sessiz', 'Dengeli', 'Turbo', 'Özel'];
+    var base = 'flex: 1; min-width: 0; height: 34px; border-radius: 8px; border: 1px solid #2A2E38; background: #1E2129; color: #C9CED8; font-size: 12.5px; font-weight: 500; cursor: pointer; padding: 0;';
+    var modes = names.map(function (n) {
+      var on = perf === n;
+      return { label: n, sel: on, style: on ? base + 'background: ' + COL[n] + '; border-color: ' + COL[n] + '; color: ' + INK + '; font-weight: 600;' : base, pick: function () { self.setState({ perf: n }); } };
+    });
+    var rowBase = 'height: 32px; border: 0; border-radius: 7px; color: #ECEEF3; font-size: 13px; display: flex; align-items: center; gap: 10px; padding: 0 10px; cursor: pointer;';
+    var rows = names.map(function (n) {
+      var on = perf === n;
+      return { label: n, sel: on, style: rowBase + 'background: ' + (on ? '#23262E' : 'transparent') + ';', dot: 'width: 8px; height: 8px; border-radius: 4px; background: ' + COL[n] + ';', pick: function () { self.setState({ perf: n }); } };
+    });
+    return { accent: COL[perf], perf: perf, modes: modes, rows: rows };
+  }
+}
+</script>
+</body>
+</html>

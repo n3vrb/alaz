@@ -63,3 +63,21 @@ Seçenek B: ppd kalsın, uygulama ppd'yi tek kaynak olarak kullansın (daha az �
 
 ## Adım 5 — Küçük temizlik
 - Çekirdek satırındaki tanınmayan `nvidia.NVreg_EnableBacklightHandler=0` kaldırılabilir (zararsız).
+
+## Sonuçlar (2026-10-02 akşam)
+
+- Adım 1–2 uygulandı: sürücü 580.178 hizalı (RTX 5070 Laptop), 570/dkms-580 artıkları silindi,
+  supergfxd `hotplug_type: Asus` + `always_reboot: true`, power-profiles-daemon masked.
+- **UYARI — canlı geçiş yasak:** `supergfxctl -m Integrated` oturum açıkken çalıştırıldığında
+  `always_reboot`'a rağmen supergfxd canlı geçiş yaptı: gnome-shell ve Xwayland'i ÖLDÜRDÜ
+  (oturum çöktü), sonra rmmod hatası yüzünden Hybrid'e geri döndü ve modprobe/Vulkan ICD
+  dosyalarını Integrated halinde bıraktı (`systemctl restart supergfxd` düzeltti).
+- **Çalışan yöntem — açılışta geçiş:** `/etc/supergfxd.conf` içinde `"mode"` değiştir + reboot.
+  supergfxd `Before=display-manager.service` olduğundan geçişi GDM'den önce, kimse kartı
+  tutmazken yapar. Eco testi BAŞARILI: mode Integrated, status off, dgpu_disable=1,
+  lspci'de NVIDIA yok, NVRM hatası yok.
+- Uygulama tasarımı buna göre: GPU modu değişimi = yetkili yardımcı (polkit) config'e yazar →
+  "Yeniden başlat" onayı. `supergfxctl -m` ASLA canlı çağrılmaz.
+- Açık konu: Eco'da boşta ~22 W tüketim yüksek. Şüpheliler: `pcie_aspm=off` çekirdek
+  parametresi, 240 Hz panel. Güç optimizasyonunda incelenecek.
+- Sıradaki test: aynı yöntemle Hybrid'e dönüş (dgpu_disable=1 → 0, açılışta yeniden tarama).
