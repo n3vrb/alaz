@@ -74,10 +74,23 @@ Seçenek B: ppd kalsın, uygulama ppd'yi tek kaynak olarak kullansın (daha az �
   dosyalarını Integrated halinde bıraktı (`systemctl restart supergfxd` düzeltti).
 - **Çalışan yöntem — açılışta geçiş:** `/etc/supergfxd.conf` içinde `"mode"` değiştir + reboot.
   supergfxd `Before=display-manager.service` olduğundan geçişi GDM'den önce, kimse kartı
-  tutmazken yapar. Eco testi BAŞARILI: mode Integrated, status off, dgpu_disable=1,
-  lspci'de NVIDIA yok, NVRM hatası yok.
-- Uygulama tasarımı buna göre: GPU modu değişimi = yetkili yardımcı (polkit) config'e yazar →
-  "Yeniden başlat" onayı. `supergfxctl -m` ASLA canlı çağrılmaz.
+  tutmazken yapar. Eco testi: mode Integrated, status off, dgpu_disable=1, lspci'de NVIDIA yok.
+  DÜZELTME: ilk Eco açılışında aslında "fallen off the bus" hataları VARDI (0.7 sn, initramfs'teki
+  nvidia modülü kapalı kartı yokluyordu). Çözüm: /etc/modprobe.d/rog-control-nvidia-noauto.conf
+  (blacklist nvidia*), initramfs-tools/modules içindeki geçersiz `framebuffer-nvidia` satırı
+  yorumlandı, `update-initramfs -u -k all`. Sonrasında Eco açılışı TEMİZ ("No NVIDIA GPU found"
+  dışında satır yok); Hybrid'de sürücüyü supergfxd adıyla yüklüyor (3.6 sn) — çalışıyor.
+- **Canlı Eco→Hybrid de yasak:** `supergfxctl -m Hybrid` canlıda kartı geri getirdi ve sürücü
+  yüklendi, ama Wayland gnome-shell yeni GPU'yu hotplug ederken kilitlendi ("Failed to hotplug
+  secondary gpu", EGL hataları) → güç düğmesiyle kapatma gerekti. Sonuç: bu sistemde GPU iki
+  yönde de canlı eklenip çıkarılamaz.
+- Açılışta Eco'dan çıkış da kendiliğinden olmaz: supergfxd `asus_boot_safety_check`,
+  dgpu_disable=1 görünce modu Integrated'a zorlar.
+- Uygulama tasarımı (polkit yardımcısı, `supergfxctl -m` ASLA canlı çağrılmaz):
+  - Eco'ya giriş: config "mode"=Integrated → yeniden başlat. (test edildi, temiz)
+  - Eco'dan çıkış: `systemctl stop supergfxd` → config "mode"=Hybrid → dgpu_disable=0 yaz
+    (noauto blacklist sayesinde sürücü yüklenmez, gnome-shell'in yakalayacağı DRM aygıtı oluşmaz)
+    → yeniden başlat. (HENÜZ TEST EDİLMEDİ)
 - Açık konu: Eco'da boşta ~22 W tüketim yüksek. Şüpheliler: `pcie_aspm=off` çekirdek
   parametresi, 240 Hz panel. Güç optimizasyonunda incelenecek.
-- Sıradaki test: aynı yöntemle Hybrid'e dönüş (dgpu_disable=1 → 0, açılışta yeniden tarama).
+- Sıradaki test: yukarıdaki Eco'dan çıkış prosedürü.
