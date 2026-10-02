@@ -1,0 +1,532 @@
+"""UI -> backend bridge: the only write path of the application."""
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Callable
+
+from PyQt6.QtCore import QObject, QSettings, QTimer
+from PyQt6.QtDBus import QDBusConnection
+
+from ..backend import dbus_util
+from ..backend.dbus_util import Typed
+from ..backend.types import Epp, FanCurve, GfxMode, GfxPower, Profile
+from .state import AppState, AuraView, DisplayView, GfxView
+
+log = logging.getLogger(__name__)
+
+MUX_PATH = "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode"
+
+PPT_MIN, PPT_MAX = 15, 170
+DEFAULT_CUSTOM = (60, 90, 110)
+
+_POLICY_TO_MODE = {
+    Profile.QUIET: "quiet",
+    Profile.BALANCED: "balanced",
+    Profile.PERFORMANCE: "turbo",
+}
+_MODE_TO_PROFILE = {
+    "quiet": Profile.QUIET,
+    "balanced": Profile.BALANCED,
+    "turbo": Profile.PERFORMANCE,
+    "custom": Profile.PERFORMANCE,
+}
+_EPP_PROP = {
+    "quiet": "ThrottleQuietEpp",
+    "balanced": "ThrottleBalancedEpp",
+    "turbo": "ThrottlePerformanceEpp",
+    "custom": "ThrottlePerformanceEpp",
+}
+_GFX_TO_VIEW = {
+    GfxMode.INTEGRATED: "eco",
+    GfxMode.HYBRID: "standard",
+    GfxMode.ASUS_MUX_DGPU: "ultimate",
+}
+_VIEW_TO_GFX = {"eco": GfxMode.INTEGRATED, "standard": GfxMode.HYBRID}
+_POWER_TO_STR = {
+    GfxPower.ACTIVE: "active",
+    GfxPower.SUSPENDED: "sleep",
+    GfxPower.OFF: "off",
+    GfxPower.ASUS_DISABLED: "off",
+}
+
+K_CUSTOM_ACTIVE = "perf/custom_active"
+K_PL = ("custom/pl1", "custom/pl2", "custom/fppt")
+K_AUTO_REFRESH = "display/auto_refresh"
+
+
+def _clamp_limits(pl1: int, pl2: int, fppt: int) -> tuple[int, int, int]:
+    pl1 = max(PPT_MIN, min(PPT_MAX, int(pl1)))
+    pl2 = max(PPT_MIN, min(PPT_MAX, int(pl2)))
+    fppt = max(PPT_MIN, min(PPT_MAX, int(fppt)))
+    pl2 = max(pl2, pl1)
+    fppt = max(fppt, pl2)
+    return pl1, pl2, fppt
+
+
+def _helper_exit_code(message: str) -> int | None:
+    """Fallback only: recover the exit code from the message text.
+
+    Prefer ``GfxClient.last_exit_code``; this is used when a gfx client
+    (e.g. a test fake) doesn't provide it.
+    """
+    m = re.search(r"code (\d+)", message)
+    if m:
+        return int(m.group(1))
+    if "Eco'dan çıkış" in message or "Leaving Eco" in message:
+        return 3
+    if "MUX" in message:
+        return 4
+    return None
+
+
+class Controller(QObject):
+    def __init__(
+        self,
+        state: AppState,
+        asusd,
+        gfx,
+        sensors,
+        display,
+        settings: QSettings,
+        *,
+        mux_path: str = MUX_PATH,
+        dbus_call: Callable[..., None] | None = None,
+        parent: QObject | None = None,
+    ):
+        super().__init__(parent)
+        self.state = state
+        self.asusd = asusd
+        self.gfx = gfx
+        self.sensors = sensors
+        self.display = display
+        self.settings = settings
+        self.mux_path = mux_path
+        self._dbus_call = dbus_call or dbus_util.async_call
+        self._started = False
+
+        self._policy: Profile | None = None
+        self._custom_flag = settings.value(K_CUSTOM_ACTIVE, False, type=bool)
+        self._auto_refresh = settings.value(K_AUTO_REFRESH, False, type=bool)
+        self._auto_for: bool | None = None   # on_ac value auto-refresh last evaluated for
+        self._on_ac: bool | None = None
+        self._display_state: Any = None
+        self._refresh_busy = False
+        self.state.set_display(DisplayView(auto=self._auto_refresh))
+
+    # ------------------------------------------------------------ lifecycle
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        self.asusd.platformChanged.connect(self._on_platform)
+        self.asusd.auraChanged.connect(self._on_aura)
+        self.asusd.error.connect(self._on_asusd_error)
+        self.gfx.modeChanged.connect(lambda _m: self._rebuild_gfx())
+        self.gfx.powerChanged.connect(lambda _p: self._rebuild_gfx())
+        if hasattr(self.gfx, "pendingChanged"):
+            self.gfx.pendingChanged.connect(lambda *_a: self._rebuild_gfx())
+        self.sensors.updated.connect(self._on_sensors)
+        self.display.changed.connect(self._on_display)
+        self.display.error.connect(self._on_display_error)
+
+        for name, value in self._cached_platform().items():
+            self._on_platform(name, value)
+        self._on_aura_cached()
+        self.asusd.refresh()
+        self.gfx.refresh()
+        self.display.refresh()
+        self._rebuild_gfx()
+        self.sensors.start(1000)
+
+    def _cached_platform(self) -> dict[str, Any]:
+        names = ("ThrottleThermalPolicy", "ChargeControlEndThreshold")
+        out = {}
+        for n in names:
+            v = self.asusd.get_cached(n)
+            if v is not None:
+                out[n] = v
+        return out
+
+    # ----------------------------------------------------------- busy / error
+    def _pulse(self, key: str, fn: Callable[[], None]) -> None:
+        """Run a fire-and-forget write wrapped in busyChanged(key, True/False)."""
+        self.state.emit_busy(key, True)
+        try:
+            fn()
+        except Exception:
+            log.exception("write %s failed", key)
+            self.state.emit_message("error", f"İşlem başarısız oldu ({key}).")
+        finally:
+            QTimer.singleShot(0, lambda: self.state.emit_busy(key, False))
+
+    def _on_asusd_error(self, op: str, msg: str) -> None:
+        self.state.emit_message("error", f"asusd işlemi başarısız ({op}): {msg}")
+
+    def _on_display_error(self, msg: str) -> None:
+        self.state.emit_message("error", f"Yenileme hızı değiştirilemedi: {msg}")
+        self._end_refresh_busy()
+
+    # ------------------------------------------------------------ platform
+    def _on_platform(self, name: str, value: Any) -> None:
+        self.state.set_platform_value(name, value)
+        if name == "ThrottleThermalPolicy":
+            try:
+                policy = Profile(int(value))
+            except (TypeError, ValueError):
+                return
+            self._policy = policy
+            if policy != Profile.PERFORMANCE and self._custom_flag:
+                self._set_custom_flag(False)
+            self._derive_mode()
+        elif name == "ChargeControlEndThreshold":
+            try:
+                self.state.set_battery_limit(int(value))
+            except (TypeError, ValueError):
+                pass
+
+    def _set_custom_flag(self, flag: bool) -> None:
+        self._custom_flag = flag
+        self.settings.setValue(K_CUSTOM_ACTIVE, flag)
+
+    def _derive_mode(self) -> None:
+        if self._policy is None:
+            return
+        if self._policy == Profile.PERFORMANCE and self._custom_flag:
+            mode = "custom"
+        else:
+            mode = _POLICY_TO_MODE[self._policy]
+        self.state.set_perf_mode(mode)
+
+    # ------------------------------------------------------------ perf mode
+    def custom_limits(self) -> tuple[int, int, int]:
+        vals = [self.settings.value(k, d, type=int) for k, d in zip(K_PL, DEFAULT_CUSTOM)]
+        return _clamp_limits(*vals)
+
+    def set_perf_mode(self, mode: str) -> None:
+        if mode not in _MODE_TO_PROFILE:
+            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            return
+        custom = mode == "custom"
+        self._set_custom_flag(custom)
+        self._derive_mode()
+
+        def write() -> None:
+            self.asusd.set_platform("ThrottleThermalPolicy", int(_MODE_TO_PROFILE[mode]))
+            if custom:
+                self._write_limits(*self.custom_limits())
+            else:
+                log.info("left custom/policy changed: firmware returns to its own "
+                         "power limits (unverified)")
+
+        self._pulse("perf", write)
+
+    def _write_limits(self, pl1: int, pl2: int, fppt: int) -> None:
+        log.info("writing custom limits PL1=%s PL2=%s FPPT=%s W; firmware semantics "
+                 "of these Ppt* values are unverified", pl1, pl2, fppt)
+        self.asusd.set_platform("PptPl1Spl", pl1)
+        self.asusd.set_platform("PptPl2Sppt", pl2)
+        self.asusd.set_platform("PptFppt", fppt)
+
+    def set_custom_limits(self, pl1: int, pl2: int, fppt: int) -> None:
+        pl1, pl2, fppt = _clamp_limits(pl1, pl2, fppt)
+        for key, v in zip(K_PL, (pl1, pl2, fppt)):
+            self.settings.setValue(key, v)
+        if self.state.perf_mode == "custom":
+            self._pulse("custom", lambda: self._write_limits(pl1, pl2, fppt))
+
+    # ------------------------------------------------------------------ GPU
+    def _read_mux_direct(self) -> bool | None:
+        try:
+            with open(self.mux_path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+        except OSError:
+            return None
+        return (text == "0") if text in ("0", "1") else None
+
+    def _rebuild_gfx(self) -> None:
+        mode = getattr(self.gfx, "mode", None)
+        active = _GFX_TO_VIEW.get(mode) if mode is not None else None
+        boot_mode = self.gfx.configured_boot_mode()
+        boot = _GFX_TO_VIEW.get(boot_mode) if boot_mode is not None else None
+        pending = boot if (boot is not None and active is not None and boot != active) else None
+        snap = self.state.sensors
+        if snap is not None and getattr(snap, "gpu_state", "unknown") != "unknown":
+            power = snap.gpu_state
+        else:
+            gp = getattr(self.gfx, "power", None)
+            power = _POWER_TO_STR.get(gp, "unknown") if gp is not None else "unknown"
+        self.state.set_gfx(GfxView(
+            active=active, boot=boot, pending=pending, power=power,
+            dgpu_disabled=self.gfx.dgpu_disabled(),
+            mux_direct=self._read_mux_direct(),
+            can_eco_exit=False,
+        ))
+
+    def request_gpu_mode(self, mode: str) -> None:
+        if mode not in _VIEW_TO_GFX:
+            self.state.emit_message("warn", "Bu GPU modu henüz desteklenmiyor.")
+            return
+        self._request_boot(_VIEW_TO_GFX[mode], mode, cancel=False)
+
+    def cancel_gpu_pending(self) -> None:
+        active = self.state.gfx.active
+        if active not in _VIEW_TO_GFX:
+            self.state.emit_message("warn", "Bekleyen değişiklik iptal edilemedi: "
+                                    "etkin GPU modu bilinmiyor veya desteklenmiyor.")
+            return
+        self._request_boot(_VIEW_TO_GFX[active], active, cancel=True)
+
+    def _request_boot(self, gfx_mode: GfxMode, name: str, cancel: bool) -> None:
+        self.state.emit_busy("gpu", True)
+
+        def done(ok: bool, msg: str) -> None:
+            self.state.emit_busy("gpu", False)
+            self._rebuild_gfx()
+            if ok:
+                if cancel:
+                    self.state.emit_message("info", "Bekleyen GPU değişikliği iptal edildi.")
+                else:
+                    label = {"eco": "Eco", "standard": "Standart"}[name]
+                    self.state.emit_message("info", f"{label} yeniden başlatınca etkin olacak.")
+                return
+            code = getattr(self.gfx, "last_exit_code", None)
+            if code is None:
+                code = _helper_exit_code(msg)
+            if code == 126:
+                self.state.emit_message("info", "Yetkilendirme iptal edildi; hiçbir şey değiştirilmedi.")
+            elif code == 127:
+                self.state.emit_message(
+                    "error",
+                    "GPU yardımcısı çalıştırılamadı: yetki verilmedi ya da kurulu değil "
+                    "(kurulum: sudo helper/install.sh).")
+            elif code == 3:
+                self.state.emit_message(
+                    "warn",
+                    "Eco'dan çıkış henüz desteklenmiyor; hiçbir şey değiştirilmedi. "
+                    "Şu an geri dönmenin yolu Windows'ta G-Helper → Standart seçmektir.")
+            elif code == 4:
+                self.state.emit_message(
+                    "warn",
+                    "Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz. "
+                    "Önce Ultimate modundan çıkılmalı.")
+            else:
+                self.state.emit_message("error", f"GPU modu değiştirilemedi: {msg}")
+
+        try:
+            self.gfx.request_boot_mode(gfx_mode, done)
+        except Exception:
+            log.exception("request_boot_mode raised")
+            done(False, "beklenmeyen hata")
+
+    def reboot_now(self) -> None:
+        log.info("requesting reboot via logind")
+        self.state.emit_busy("reboot", True)
+
+        def done(_result, err) -> None:
+            self.state.emit_busy("reboot", False)
+            if err:
+                self.state.emit_message("error", f"Yeniden başlatılamadı: {err}")
+
+        self._dbus_call(
+            QDBusConnection.systemBus(), "org.freedesktop.login1", "/org/freedesktop/login1",
+            "org.freedesktop.login1.Manager", "Reboot", [Typed("b", False)], done,
+        )
+
+    # -------------------------------------------------------------- display
+    def _on_display(self, st: Any) -> None:
+        self._display_state = st
+        self._publish_display()
+        self._end_refresh_busy()
+        self._maybe_auto_refresh()
+
+    def _publish_display(self) -> None:
+        st = self._display_state
+        if st is None:
+            self.state.set_display(DisplayView(auto=self._auto_refresh))
+        else:
+            self.state.set_display(DisplayView(
+                connector=st.connector, current_hz=st.current_hz,
+                rates=list(st.rates), auto=self._auto_refresh))
+
+    def _end_refresh_busy(self) -> None:
+        if self._refresh_busy:
+            self._refresh_busy = False
+            self.state.emit_busy("refresh", False)
+
+    def _begin_refresh_busy(self) -> None:
+        if not self._refresh_busy:
+            self._refresh_busy = True
+            self.state.emit_busy("refresh", True)
+            QTimer.singleShot(10000, self._end_refresh_busy)
+
+    def set_refresh(self, hz: int | None) -> None:
+        if hz is None:
+            self._auto_refresh = True
+            self.settings.setValue(K_AUTO_REFRESH, True)
+            self._auto_for = None
+            self._publish_display()
+            self._maybe_auto_refresh()
+            return
+        self._auto_refresh = False
+        self.settings.setValue(K_AUTO_REFRESH, False)
+        self._publish_display()
+        self._apply_hz(int(hz))
+
+    def _apply_hz(self, hz: int) -> None:
+        self._begin_refresh_busy()
+        self.display.set_refresh(hz)
+
+    def _maybe_auto_refresh(self) -> None:
+        if not self._auto_refresh or self._on_ac is None:
+            return
+        st = self._display_state
+        if st is None or not st.rates or self._auto_for == self._on_ac:
+            return
+        self._auto_for = self._on_ac
+        rates = list(st.rates)
+        target = max(rates) if self._on_ac else (60 if 60 in rates else None)
+        if target is None or target == st.current_hz:
+            return
+        log.info("auto refresh: on_ac=%s -> %s Hz", self._on_ac, target)
+        self._apply_hz(target)
+
+    # -------------------------------------------------------------- sensors
+    def _on_sensors(self, snap: Any) -> None:
+        self.state.set_sensors(snap)
+        on_ac = getattr(snap, "on_ac", None)
+        if on_ac is not None:
+            self._on_ac = bool(on_ac)
+            self._maybe_auto_refresh()
+        # sensors may refine the GPU power string
+        cur = self.state.gfx.power
+        gs = getattr(snap, "gpu_state", "unknown")
+        if gs != "unknown" and gs != cur:
+            self._rebuild_gfx()
+
+    # ----------------------------------------------------- simple platform writes
+    def set_panel_od(self, on: bool) -> None:
+        self._pulse("panel_od", lambda: self.asusd.set_platform("PanelOd", bool(on)))
+
+    def set_battery_limit(self, pct: int) -> None:
+        pct = max(20, min(100, int(pct)))
+        self._pulse("battery_limit",
+                    lambda: self.asusd.set_platform("ChargeControlEndThreshold", pct))
+
+    def set_epp(self, mode: str, epp: int) -> None:
+        prop = _EPP_PROP.get(mode)
+        if prop is None:
+            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            return
+        try:
+            value = int(Epp(int(epp)))
+        except ValueError:
+            self.state.emit_message("error", f"Geçersiz EPP değeri: {epp}")
+            return
+        self._pulse("epp", lambda: self.asusd.set_platform(prop, value))
+
+    def set_nv_boost(self, w: int) -> None:
+        self._pulse("nv", lambda: self.asusd.set_platform("NvDynamicBoost", int(w)))
+
+    def set_nv_temp_target(self, c: int) -> None:
+        self._pulse("nv", lambda: self.asusd.set_platform("NvTempTarget", int(c)))
+
+    def set_auto_profile(self, on_ac: str, on_battery: str) -> None:
+        try:
+            ac, bat = _MODE_TO_PROFILE[on_ac], _MODE_TO_PROFILE[on_battery]
+        except KeyError:
+            self.state.emit_message("error", "Geçersiz otomatik profil seçimi.")
+            return
+
+        def write() -> None:
+            self.asusd.set_platform("ThrottlePolicyOnAc", int(ac))
+            self.asusd.set_platform("ThrottlePolicyOnBattery", int(bat))
+            self.asusd.set_platform("ChangeThrottlePolicyOnAc", True)
+            self.asusd.set_platform("ChangeThrottlePolicyOnBattery", True)
+
+        self._pulse("auto_profile", write)
+
+    # ------------------------------------------------------------ fan curves
+    def load_fan_curves(self, mode: str) -> None:
+        profile = _MODE_TO_PROFILE.get(mode)
+        if profile is None:
+            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            return
+        self.state.emit_busy("fan_load", True)
+
+        def done(curves: list[FanCurve]) -> None:
+            self.state.emit_busy("fan_load", False)
+            if curves:
+                self.state.set_fan_curves(mode, curves)
+            else:
+                self.state.emit_message("error", "Fan eğrileri okunamadı.")
+
+        self.asusd.fetch_fan_curves(profile, done)
+
+    def apply_fan_curve(self, mode: str, fan: str, points: list[tuple[int, int]]) -> None:
+        profile = _MODE_TO_PROFILE.get(mode)
+        if profile is None:
+            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            return
+        if len(points) != 8:
+            self.state.emit_message("error", "Fan eğrisi tam olarak 8 nokta içermelidir.")
+            return
+        try:
+            temps = [int(t) for t, _ in points]
+            pcts = [int(p) for _, p in points]
+        except (TypeError, ValueError):
+            self.state.emit_message("error", "Fan eğrisi noktaları geçersiz.")
+            return
+        if any(b <= a for a, b in zip(temps, temps[1:])):
+            self.state.emit_message("error", "Fan eğrisinde sıcaklıklar artan sırada olmalıdır.")
+            return
+        if not all(0 <= t <= 255 for t in temps) or not all(0 <= p <= 100 for p in pcts):
+            self.state.emit_message("error", "Fan eğrisi değerleri aralık dışında.")
+            return
+        curve = FanCurve(fan.upper(), tuple(temps),
+                         tuple(round(p * 255 / 100) for p in pcts), True)
+        self._pulse("fan", lambda: self.asusd.set_fan_curve(profile, curve))
+        cached = self.state.fan_curves.get(mode)
+        if cached:
+            self.state.set_fan_curves(
+                mode, [curve if c.fan.upper() == curve.fan else c for c in cached])
+
+    def reset_fan_curves(self, mode: str) -> None:
+        profile = _MODE_TO_PROFILE.get(mode)
+        if profile is None:
+            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            return
+        self._pulse("fan", lambda: self.asusd.reset_fan_curves(profile))
+        QTimer.singleShot(500, lambda: self.load_fan_curves(mode))
+
+    # ------------------------------------------------------------- keyboard
+    def _on_aura(self, name: str, value: Any) -> None:
+        cur = self.state.aura
+        if name == "Brightness":
+            try:
+                self.state.set_aura(AuraView(int(value), cur.color))
+            except (TypeError, ValueError):
+                pass
+        elif name == "LedModeData":
+            try:
+                c = value[2]
+                color = (int(c[0]), int(c[1]), int(c[2]))
+            except (TypeError, ValueError, IndexError):
+                return
+            self.state.set_aura(AuraView(cur.brightness, color))
+
+    def _on_aura_cached(self) -> None:
+        getter = getattr(self.asusd, "get_aura_cached", None)
+        if getter is None:
+            return
+        for n in ("Brightness", "LedModeData"):
+            v = getter(n)
+            if v is not None:
+                self._on_aura(n, v)
+
+    def set_kbd_brightness(self, level: int) -> None:
+        level = max(0, min(3, int(level)))
+        self._pulse("kbd", lambda: self.asusd.set_kbd_brightness(level))
+
+    def set_kbd_color(self, rgb: tuple[int, int, int]) -> None:
+        self._pulse("kbd", lambda: self.asusd.set_aura_static(tuple(rgb)))

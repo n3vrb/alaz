@@ -224,7 +224,10 @@ class GfxClient(QObject):
 
         Runs ``pkexec <helper> set-boot-mode <integrated|hybrid>`` asynchronously;
         ``callback(ok, message)`` is invoked once.  Nothing changes live.
+        The process exit code (or ``None`` if it never ran) is stored in
+        ``self.last_exit_code`` before the callback fires.
         """
+        self.last_exit_code = None
         try:
             arg = _HELPER_ARGS[GfxMode(mode)]
         except (KeyError, ValueError):
@@ -251,6 +254,7 @@ class GfxClient(QObject):
                 log.exception("request_boot_mode callback raised")
 
         def on_finished(code, _status) -> None:
+            self.last_exit_code = int(code)
             out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace").strip()
             err = bytes(proc.readAllStandardError()).decode("utf-8", "replace").strip()
             if code == 0:

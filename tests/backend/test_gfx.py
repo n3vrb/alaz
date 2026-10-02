@@ -281,3 +281,13 @@ def test_live_read_only_refresh():
     assert c.available
     assert c.mode in list(GfxMode) and c.power in list(GfxPower)
     assert c.mode in c.supported
+
+
+def test_request_boot_mode_stores_exit_code():
+    FakeProcess.instances.clear()
+    c = GfxClient()
+    c.process_factory = FakeProcess
+    seen = []
+    c.request_boot_mode(GfxMode.HYBRID, lambda ok, msg: seen.append(c.last_exit_code))
+    FakeProcess.instances[0].finished.slots[0](126, None)
+    assert seen == [126]
