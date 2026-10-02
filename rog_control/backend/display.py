@@ -6,10 +6,11 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
 
 try:
     import gi
@@ -26,6 +27,7 @@ log = logging.getLogger(__name__)
 
 MUTTER_NAME = "org.gnome.Mutter.DisplayConfig"
 MUTTER_PATH = "/org/gnome/Mutter/DisplayConfig"
+X11_POLL_MS = 10_000
 APPLY_TEMPORARY = 1
 
 
@@ -115,23 +117,26 @@ def mutter_apply(args) -> None:
 # ---- xrandr -------------------------------------------------------------
 
 def parse_xrandr(out: str) -> DisplayState | None:
+    """Internal eDP* output only; rates come from its CURRENT mode line (the one with '*')."""
     conn = None
     rates: set[int] = set()
     current = 0
+    found = False
     for line in out.splitlines():
         m = re.match(r"^(\S+) (connected|disconnected)", line)
         if m:
-            if conn:
+            if found:
                 break
-            conn = m.group(1) if (m.group(2) == "connected" and is_internal(m.group(1))) else None
+            if m.group(2) == "connected" and is_internal(m.group(1)):
+                conn, found = m.group(1), True
             continue
-        if conn and re.match(r"^\s+\d+x\d+", line):
-            for rate, star in re.findall(r"(\d+\.\d+)(\*?)", line):
+        if found and re.match(r"^\s+\d+x\d+", line) and "*" in line:
+            for rate, star in re.findall(r"(\d+(?:\.\d+)?)(\*?)", line.split(None, 1)[1]):
                 r = int(round(float(rate)))
                 rates.add(r)
                 if star:
                     current = r
-    if not conn:
+    if not found:
         return None
     return DisplayState(conn, current, sorted(rates))
 
@@ -147,6 +152,31 @@ def xrandr_set(connector: str, hz: int) -> None:
                        capture_output=True, text=True, timeout=8, check=True)
     except subprocess.CalledProcessError as exc:
         raise DisplayError(exc.stderr or str(exc)) from exc
+
+
+def mutter_subscribe(callback: Callable[[], None]) -> Callable[[], None]:
+    """Subscribe to Mutter's MonitorsChanged on a private GLib loop thread.
+
+    ``callback`` runs on that helper thread (never the GUI thread). Returns a stop function.
+    """
+    ctx = GLib.MainContext.new()
+    loop = GLib.MainLoop.new(ctx, False)
+
+    def run():
+        ctx.push_thread_default()
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus.signal_subscribe(MUTTER_NAME, MUTTER_NAME, "MonitorsChanged", MUTTER_PATH,
+                                 None, Gio.DBusSignalFlags.NONE,
+                                 lambda *_a: callback(), None)
+            loop.run()
+        except Exception:  # noqa: BLE001
+            log.exception("MonitorsChanged subscription failed")
+        finally:
+            ctx.pop_thread_default()
+
+    threading.Thread(target=run, name="mutter-monitors", daemon=True).start()
+    return loop.quit
 
 
 # ---- client -------------------------------------------------------------
@@ -168,9 +198,10 @@ class DisplayClient(QObject):
     error = pyqtSignal(str)
     _result = pyqtSignal(object)
     _failed = pyqtSignal(str)
+    _external = pyqtSignal()  # MonitorsChanged (emitted from the helper thread, queued to GUI)
 
     def __init__(self, parent: QObject | None = None, *, get_state=None, apply=None,
-                 use_mutter: bool | None = None):
+                 use_mutter: bool | None = None, subscribe=None):
         super().__init__(parent)
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(1)
@@ -180,6 +211,38 @@ class DisplayClient(QObject):
         self._apply = apply or mutter_apply
         self._result.connect(self.changed)
         self._failed.connect(self.error)
+        self._subscribe = subscribe or mutter_subscribe
+        self._unsubscribe: Callable[[], None] | None = None
+        self._poll: QTimer | None = None
+        self._external.connect(self.refresh)
+
+    def start_watching(self) -> None:
+        """Keep state fresh after external changes (call once; refresh stays off the GUI thread).
+
+        Wayland: re-read on Mutter ``MonitorsChanged``. X11: re-read every 10 s, only while a
+        listener is connected to ``changed``. ``refresh()`` may also be called directly
+        (the controller does so before comparing).
+        """
+        if self._mutter:
+            if self._unsubscribe is None:
+                self._unsubscribe = self._subscribe(self._external.emit)
+        elif self._poll is None:
+            self._poll = QTimer(self)
+            self._poll.setInterval(X11_POLL_MS)
+            self._poll.timeout.connect(self._poll_tick)
+            self._poll.start()
+
+    def stop_watching(self) -> None:
+        if self._unsubscribe is not None:
+            self._unsubscribe()
+            self._unsubscribe = None
+        if self._poll is not None:
+            self._poll.stop()
+            self._poll = None
+
+    def _poll_tick(self) -> None:
+        if self.receivers(self.changed) > 0:
+            self.refresh()
 
     def _read_state(self) -> DisplayState | None:
         if self._mutter:

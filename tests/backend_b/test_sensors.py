@@ -34,8 +34,16 @@ class Smi:
         return 55.0, 12.0, 20.5
 
 
-def sampler(tmp_path, smi, clock=lambda: 0.0):
-    return S.Sampler(str(tmp_path / "pci"), str(tmp_path / "hwmon"), str(tmp_path / "ps"), smi, clock)
+def sampler(tmp_path, smi, clock=lambda: 0.0, own_pid=None):
+    return S.Sampler(str(tmp_path / "pci"), str(tmp_path / "hwmon"), str(tmp_path / "ps"), smi, clock,
+                     str(tmp_path / "proc"), own_pid if own_pid is not None else 999999)
+
+
+def add_proc(tmp_path, pid, comm="game", target="/dev/nvidia0"):
+    d = tmp_path / "proc" / str(pid)
+    (d / "fd").mkdir(parents=True, exist_ok=True)
+    w(d / "comm", comm)
+    os.symlink(target, d / "fd" / "3")
 
 
 def test_fan_mapping(tmp_path):
@@ -87,13 +95,70 @@ def test_gpu_absent_no_smi(tmp_path):
 
 def test_gpu_active_uses_smi(tmp_path):
     make_pci(tmp_path / "pci", "active")
+    add_proc(tmp_path, 100)
     smi = Smi()
     assert sampler(tmp_path, smi).gpu() == ("active", 55.0, 12.0, 20.5)
     assert smi.calls == 1
 
 
+def test_active_no_users_no_smi(tmp_path):
+    make_pci(tmp_path / "pci", "active")
+    (tmp_path / "proc").mkdir()
+    add_proc(tmp_path, 101, target="/dev/null")
+    smi = Smi()
+    s = sampler(tmp_path, smi)
+    assert s.gpu() == ("active", None, None, None)
+    assert smi.calls == 0
+
+
+def test_own_pid_and_persistenced_ignored(tmp_path):
+    make_pci(tmp_path / "pci", "active")
+    add_proc(tmp_path, 4242)  # own
+    add_proc(tmp_path, 300, comm="nvidia-persiste")
+    smi = Smi()
+    s = sampler(tmp_path, smi, own_pid=4242)
+    assert s.gpu() == ("active", None, None, None)
+    assert smi.calls == 0
+
+
+def test_unreadable_proc_skipped(tmp_path):
+    make_pci(tmp_path / "pci", "active")
+    w(tmp_path / "proc" / "55" / "comm", "x")  # no fd dir at all
+    add_proc(tmp_path, 56)
+    smi = Smi()
+    assert sampler(tmp_path, smi).gpu()[1] == 55.0
+
+
+def test_smi_rate_limited_with_users(tmp_path):
+    make_pci(tmp_path / "pci", "active")
+    add_proc(tmp_path, 100)
+    t = [0.0]
+    smi = Smi()
+    s = sampler(tmp_path, smi, lambda: t[0])
+    outs = []
+    for i in range(10):
+        t[0] = float(i)
+        outs.append(s.gpu())
+    assert smi.calls == 2  # t=0 and t=5 -> at most one per 5 s
+    assert all(o == ("active", 55.0, 12.0, 20.5) for o in outs)
+
+
+def test_users_scan_cached_5s(tmp_path):
+    make_pci(tmp_path / "pci", "active")
+    t = [0.0]
+    smi = Smi()
+    s = sampler(tmp_path, smi, lambda: t[0])
+    assert s.gpu()[1] is None
+    add_proc(tmp_path, 100)
+    t[0] = 2.0
+    assert s.gpu()[1] is None and smi.calls == 0  # cached "no users"
+    t[0] = 5.0
+    assert s.gpu()[1] == 55.0
+
+
 def test_smi_backoff(tmp_path):
     make_pci(tmp_path / "pci", "active")
+    add_proc(tmp_path, 100)
     t = [0.0]
     smi = Smi(fail=True)
     s = sampler(tmp_path, smi, lambda: t[0])
@@ -119,3 +184,14 @@ def test_full_sample_and_reader(tmp_path, qtbot=None):
     loop.exec()
     r.stop()
     assert got and got[0].gpu_state == "sleep"
+
+
+def test_compositor_holders_are_not_gpu_users(tmp_path):
+    # gnome-shell/Xwayland keep /dev/nvidia0 open permanently (verified live while
+    # the GPU stayed suspended); they must not trigger nvidia-smi polling.
+    make_pci(tmp_path / "pci", "active")
+    add_proc(tmp_path, 2722, comm="gnome-shell")
+    add_proc(tmp_path, 3199, comm="Xwayland")
+    smi = Smi()
+    assert sampler(tmp_path, smi).gpu() == ("active", None, None, None)
+    assert smi.calls == 0

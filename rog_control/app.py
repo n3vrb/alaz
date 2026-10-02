@@ -183,7 +183,17 @@ def main(argv: list[str] | None = None) -> int:
     shell = Shell(state, controller, settings)
     guard.activated.connect(shell.show_main)
     controller.start()
+    # Follow external refresh-rate changes (GNOME settings, other tools) so
+    # current_hz never goes stale. Real DisplayClient only; fakes don't have it.
+    for obj in _keep:
+        watch = getattr(obj, "start_watching", None)
+        if callable(watch):
+            watch()
     shell.start(minimized=args.minimized)
     code = app.exec()
+    for obj in _keep:
+        stop = getattr(obj, "stop_watching", None)
+        if callable(stop):
+            stop()
     guard.close()
     return code

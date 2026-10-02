@@ -1,13 +1,17 @@
 """Periodic hardware sensor sampling (off the GUI thread).
 
 Hard rule: the NVIDIA dGPU is never woken. ``nvidia-smi`` runs only when the
-PCI device's ``power/runtime_status`` reads ``active``.
+PCI device's ``power/runtime_status`` reads ``active`` AND a /proc scan shows a
+real user holding ``/dev/nvidia[0-9]*`` open (every nvidia-smi run resets the
+runtime-PM autosuspend timer, so polling it would keep the GPU awake forever).
+Only ``power/runtime_status`` of the device is ever read.
 """
 from __future__ import annotations
 
 import glob
 import logging
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -22,6 +26,10 @@ SYSFS_HWMON = "/sys/class/hwmon"
 SYSFS_POWER = "/sys/class/power_supply"
 NVIDIA_VENDOR = 0x10DE
 SMI_BACKOFF_S = 30.0
+SMI_MIN_INTERVAL_S = 5.0
+USER_SCAN_INTERVAL_S = 5.0
+PROC_ROOT = "/proc"
+_NVIDIA_DEV = re.compile(r"^/dev/nvidia\d+$")
 FAN_LABELS = {"cpu_fan": "cpu", "gpu_fan": "gpu", "mid_fan": "mid"}
 
 
@@ -148,15 +156,67 @@ def query_nvidia_smi(timeout: float = 3.0) -> tuple[float | None, float | None, 
     return _num(parts[0]), _num(parts[1]), _num(parts[2])
 
 
+# Processes that keep /dev/nvidiaN open permanently without keeping the GPU awake:
+# the compositor/X servers open every GPU at startup (verified: gnome-shell and
+# Xwayland hold it while runtime_status stays "suspended"). Counting them would
+# make every wake-up look like real use and poll nvidia-smi forever.
+_IGNORED_GPU_HOLDERS = ("nvidia-persist", "gnome-shell", "Xwayland", "Xorg", "mutter", "kwin_wayland")
+
+
+def has_gpu_users(proc_root: str = PROC_ROOT, own_pid: int | None = None) -> bool:
+    """True if any other process (not us, not nvidia-persistenced) holds /dev/nvidiaN open.
+
+    Unreadable fd dirs (other users' processes) are skipped.
+    """
+    own = os.getpid() if own_pid is None else own_pid
+    for pdir in glob.glob(os.path.join(proc_root, "[0-9]*")):
+        pid = os.path.basename(pdir)
+        if not pid.isdigit() or int(pid) == own:
+            continue
+        try:
+            fds = os.listdir(os.path.join(pdir, "fd"))
+        except OSError:
+            continue
+        hit = False
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(pdir, "fd", fd))
+            except OSError:
+                continue
+            if _NVIDIA_DEV.match(target):
+                hit = True
+                break
+        if not hit:
+            continue
+        comm = _read(os.path.join(pdir, "comm")) or ""
+        if comm.startswith(_IGNORED_GPU_HOLDERS):
+            continue
+        return True
+    return False
+
+
 class Sampler:
     """Synchronous sampler; all paths injectable for tests."""
 
     def __init__(self, pci_root: str = SYSFS_PCI, hwmon_root: str = SYSFS_HWMON,
-                 power_root: str = SYSFS_POWER, smi=query_nvidia_smi, clock=time.monotonic):
+                 power_root: str = SYSFS_POWER, smi=query_nvidia_smi, clock=time.monotonic,
+                 proc_root: str = PROC_ROOT, own_pid: int | None = None):
         self.pci_root, self.hwmon_root, self.power_root = pci_root, hwmon_root, power_root
         self._smi = smi
         self._clock = clock
         self._smi_retry_at = 0.0
+        self._smi_next_at = 0.0
+        self._smi_last: tuple[float | None, float | None, float | None] = (None, None, None)
+        self.proc_root, self.own_pid = proc_root, own_pid
+        self._users_checked_at: float | None = None
+        self._users = False
+
+    def _gpu_has_users(self) -> bool:
+        now = self._clock()
+        if self._users_checked_at is None or now - self._users_checked_at >= USER_SCAN_INTERVAL_S:
+            self._users_checked_at = now
+            self._users = has_gpu_users(self.proc_root, self.own_pid)
+        return self._users
 
     def gpu(self) -> tuple[str, float | None, float | None, float | None]:
         dev = find_nvidia_pci(self.pci_root)
@@ -167,14 +227,23 @@ class Sampler:
             return "sleep", None, None, None
         if status != "active":
             return ("sleep" if status == "suspending" else "unknown"), None, None, None
-        if self._clock() < self._smi_retry_at:
+        if not self._gpu_has_users():
+            self._smi_last = (None, None, None)
+            self._smi_next_at = 0.0
             return "active", None, None, None
+        now = self._clock()
+        if now < self._smi_retry_at:
+            return "active", None, None, None
+        if now < self._smi_next_at:
+            return ("active", *self._smi_last)
         try:
-            t, l, p = self._smi()
-            return "active", t, l, p
+            self._smi_next_at = now + SMI_MIN_INTERVAL_S
+            self._smi_last = self._smi()
+            return ("active", *self._smi_last)
         except Exception as exc:  # noqa: BLE001
             log.warning("nvidia-smi failed, backing off %ss: %s", SMI_BACKOFF_S, exc)
             self._smi_retry_at = self._clock() + SMI_BACKOFF_S
+            self._smi_last = (None, None, None)
             return "active", None, None, None
 
     def sample(self) -> SensorSnapshot:
