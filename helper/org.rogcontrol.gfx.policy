@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>ROG Control</vendor>
+  <action id="org.rogcontrol.gfx.set-boot-mode">
+    <description>Change the GPU boot mode (applied at next reboot)</description>
+    <description xml:lang="tr">GPU açılış modunu değiştir (yeniden başlatmada uygulanır)</description>
+    <message>Authentication is required to change the GPU boot mode</message>
+    <message xml:lang="tr">GPU açılış modunu değiştirmek için kimlik doğrulaması gerekir</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/rog-control-gfx-helper</annotate>
+  </action>
+</policyconfig>

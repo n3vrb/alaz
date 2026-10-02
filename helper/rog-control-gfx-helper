@@ -1,0 +1,191 @@
+#!/usr/bin/python3 -I
+# -*- coding: utf-8 -*-
+"""rog-control-gfx-helper: privileged helper (run via pkexec).
+
+Only edits the "mode" key of the supergfxd BOOT config; the switch happens at
+next reboot. Never calls supergfxctl / supergfxd D-Bus / systemctl, never
+reboots, never writes sysfs.
+
+Usage:
+  rog-control-gfx-helper set-boot-mode {integrated|hybrid}
+  rog-control-gfx-helper status
+
+Exit codes: 0 ok/no change, 2 usage, 3 Eco-exit unsupported, 4 MUX direct
+refuses Eco, 5 not root, 6 config error (symlink/invalid/IO).
+
+TEST MODE (design note): paths and the "am I root" answer normally come from
+the real system (os.geteuid(), /etc, /sys). When the hidden env var
+ROG_CONTROL_HELPER_TESTROOT is set AND euid != 0, every path is re-rooted under
+that directory and root-ness is taken from ROG_CONTROL_HELPER_FAKE_ROOT=1.
+When euid == 0 (i.e. under pkexec) both variables are IGNORED, so they cannot
+be used to redirect a real root run. Only the stdlib is used; no $PATH reliance.
+"""
+import json
+import os
+import re
+import stat
+import sys
+
+CONFIG = "/etc/supergfxd.conf"
+BACKUP = "/etc/supergfxd.conf.rog-control.bak"
+DGPU_DISABLE = "/sys/devices/platform/asus-nb-wmi/dgpu_disable"
+GPU_MUX_MODE = "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode"
+
+ENV_ROOT = "ROG_CONTROL_HELPER_TESTROOT"
+ENV_FAKE = "ROG_CONTROL_HELPER_FAKE_ROOT"
+
+USAGE = ("Kullanım / Usage:\n"
+         "  rog-control-gfx-helper set-boot-mode {integrated|hybrid}\n"
+         "  rog-control-gfx-helper status\n")
+
+MODES = {"integrated": "Integrated", "hybrid": "Hybrid"}
+_MODE_RE = re.compile(r'("mode"\s*:\s*)"([^"\\]*)"')
+
+
+class HelperError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+        self.msg = msg
+
+
+def resolve_env(environ, euid):
+    """Return (paths dict, is_root). Test env is honoured only if euid != 0."""
+    paths = {"config": CONFIG, "backup": BACKUP,
+             "dgpu_disable": DGPU_DISABLE, "gpu_mux_mode": GPU_MUX_MODE}
+    if euid == 0:
+        return paths, True
+    root = environ.get(ENV_ROOT)
+    if not root:
+        return paths, False
+    paths = {k: os.path.join(root, v.lstrip("/")) for k, v in paths.items()}
+    return paths, environ.get(ENV_FAKE) == "1"
+
+
+def _read_int(path):
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _read_config(path):
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise HelperError(6, "Yapılandırma bir symlink, reddedildi / config is a symlink, refusing")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except HelperError:
+        raise
+    except OSError as e:
+        raise HelperError(6, "Yapılandırma okunamadı / cannot read config: %s" % e)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        raw = f.read()
+    try:
+        text = raw.decode("utf-8")
+        data = json.loads(text)
+    except ValueError as e:
+        raise HelperError(6, "Geçersiz JSON / invalid JSON: %s" % e)
+    if not isinstance(data, dict) or not isinstance(data.get("mode"), str):
+        raise HelperError(6, "Beklenmeyen yapılandırma / unexpected config structure")
+    return text, data, st
+
+
+def _atomic_write(path, text, mode, uid, gid, do_chown):
+    d = os.path.dirname(path)
+    tmp = os.path.join(d, ".%s.rog-control.tmp.%d" % (os.path.basename(path), os.getpid()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+            if do_chown:
+                os.fchown(f.fileno(), uid, gid)
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def cmd_status(paths, out, err):
+    try:
+        _, data, _ = _read_config(paths["config"])
+        mode = data["mode"]
+    except HelperError:
+        mode = None
+    out.write(json.dumps({"configured_mode": mode,
+                          "dgpu_disable": _read_int(paths["dgpu_disable"]),
+                          "gpu_mux_mode": _read_int(paths["gpu_mux_mode"])}) + "\n")
+    return 0
+
+
+def cmd_set(target_arg, paths, is_root, euid, out, err):
+    if not is_root:
+        err.write("root yetkisi gerekli / root privileges required\n")
+        return 5
+    target = MODES[target_arg]
+    try:
+        text, data, st = _read_config(paths["config"])
+        if target == "Integrated" and _read_int(paths["gpu_mux_mode"]) == 0:
+            err.write("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz / "
+                      "Eco cannot be combined with dGPU-direct MUX mode\n")
+            return 4
+        if target == "Hybrid" and _read_int(paths["dgpu_disable"]) == 1:
+            err.write("Eco'dan çıkış henüz desteklenmiyor, hiçbir şey yazılmadı / "
+                      "Leaving Eco is not supported yet, nothing was written\n")
+            return 3
+        if data["mode"] == target:
+            out.write("değişiklik yok / no change\n")
+            return 0
+        if len(_MODE_RE.findall(text)) != 1:
+            raise HelperError(6, "'mode' anahtarı belirsiz / ambiguous 'mode' key")
+        new_text = _MODE_RE.sub(lambda m: '%s"%s"' % (m.group(1), target), text, count=1)
+        new_data = json.loads(new_text)
+        expect = dict(data)
+        expect["mode"] = target
+        if new_data != expect or list(new_data) != list(data):
+            raise HelperError(6, "Doğrulama başarısız / verification failed")
+        real = (euid == 0)
+        _atomic_write(paths["backup"], text, 0o644, st.st_uid, st.st_gid, real)
+        _atomic_write(paths["config"], new_text, 0o644, st.st_uid, st.st_gid, real)
+    except HelperError as e:
+        err.write(e.msg + "\n")
+        return e.code
+    except OSError as e:
+        err.write("Yazma hatası / write error: %s\n" % e)
+        return 6
+    out.write(json.dumps({"ok": True, "boot_mode": target, "reboot_required": True}) + "\n")
+    return 0
+
+
+def main(argv=None, environ=None, euid=None, out=None, err=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    environ = os.environ if environ is None else environ
+    euid = os.geteuid() if euid is None else euid
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    paths, is_root = resolve_env(environ, euid)
+    if len(argv) == 1 and argv[0] == "status":
+        return cmd_status(paths, out, err)
+    if len(argv) == 2 and argv[0] == "set-boot-mode" and argv[1] in MODES:
+        return cmd_set(argv[1], paths, is_root, euid, out, err)
+    err.write(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
