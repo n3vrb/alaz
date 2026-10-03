@@ -106,3 +106,36 @@ Seçenek B: ppd kalsın, uygulama ppd'yi tek kaynak olarak kullansın (daha az �
 - Eco'da boşta ~22–24 W tüketim yüksek (dGPU kapalıyken). Şüpheliler: `pcie_aspm=off` çekirdek
   parametresi, 240 Hz panel, parlaklık. Güç optimizasyonunda.
 - `nvidia-powerd` kurulu değil (Dynamic Boost buna bağlı) — güç profillerinde bakılacak.
+
+## Sonuçlar (2026-10-03 akşam) — Eco döngüsü ÇÖZÜLDÜ
+
+### Kök neden: Plymouth (açılış logosu) NVIDIA kartını tutuyordu
+- nvidia-drm DRM aygıtını ~2.4 sn'de, i915 ise ~6.4 sn'de oluşturuyor. Plymouth (~4.5 sn) o an mevcut
+  tek DRM aygıtı olan NVIDIA'yı açıyor. supergfxd Eco için `rmmod nvidia` yapınca "Module nvidia is in
+  use" → Eco yarım kalıyor (kart kısmen ayrılmış, dgpu_disable=0). Plymouth GDM başlayınca kapanıyor.
+  Hangi sürücünün önce hazır olduğuna bağlı → önceki "başarılı" Eco açılışları şanstı; 2 Ekim'deki
+  nv_pci_remove kilitlenmesi de büyük ihtimalle aynı kökten.
+- Çözüm: GRUB'dan `splash` kaldırıldı (`quiet` kaldı). Eco açılışı TEMİZ: Integrated/off,
+  dgpu_disable=1, "fallen off the bus" 0, kilitlenme 0.
+- Yan etki: initramfs aşaması ~6.5 sn uzadı (kök sisteme geçiş 4 sn → 10.8 sn; sebep henüz bilinmiyor,
+  log yok). Alternatif (ileride): splash'ı geri alıp Plymouth'un NVIDIA'yı kullanmamasını sağlamak.
+
+### Denenip geri alınan: supergfxd ExecStartPost bekleme drop-in'i
+- `ExecStartPost=-/usr/bin/timeout 20 /usr/bin/supergfxctl -g` GDM'i bekletti AMA supergfxctl açılış
+  sırasında yanıt alamıyor → her açılışa tam 20 sn ekledi. Kaldırıldı (Plymouth asıl suçluydu).
+
+### Eco'dan çıkış — çalışan prosedür (TEST EDİLDİ, masaüstü etkilenmedi)
+1. `systemctl stop supergfxd`
+2. `echo 0 > /sys/bus/pci/drivers_autoprobe`   (yeni PCI aygıtlarına sürücü bağlanmaz; reboot'ta 1'e döner)
+3. `/etc/supergfxd.conf` → `"mode": "Hybrid"`
+4. `echo 0 > /sys/devices/platform/asus-nb-wmi/dgpu_disable`  (5–10 sn; kart döner, sürücüsüz kalır,
+   yeni DRM aygıtı oluşmaz → gnome-shell etkilenmez)
+5. reboot → supergfxd Hybrid + dgpu_disable=0 görür → normal Hybrid açılış (nvidia bağlı, Vulkan ICD geri).
+
+### Diğer
+- GRUB_DEFAULT artık isimle: "Windows Boot Manager (on /dev/nvme0n1p1)" (sıra numarası UEFI Firmware
+  Settings'e kayıp BIOS'a atabiliyordu). Yedek: /etc/default/grub.bak-rogcontrol.
+- `pcie_aspm=off` GEREKLİ: Realtek RTS525A kart okuyucu (rtsx_pci kara listede) ASPM açıkken PCIe AER
+  hata yağmuru üretiyor (canlı USB'de görüldü). Kaldırılmayacak.
+- RAPL psys sayacı (sadece psys) udev kuralıyla okunabilir: toplam sistem gücü; pilde ölçülen gerçek
+  tüketimden ~1–2 W fazla gösteriyor.
