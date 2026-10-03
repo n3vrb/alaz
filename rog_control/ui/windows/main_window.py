@@ -62,10 +62,10 @@ class MainWindow(FramelessWindow):
         tb.setContentsMargins(16, 0, 8, 0)
         from rog_control.ui.app_icon import app_icon
         self._logo = QLabel()
-        dpr = self.devicePixelRatioF() or 1.0
-        pm = app_icon().pixmap(int(22 * dpr), int(22 * dpr))
-        pm.setDevicePixelRatio(dpr)
-        self._logo.setPixmap(pm)
+        # QIcon.pixmap() already applies the screen's device pixel ratio in Qt 6;
+        # scaling it again made the logo 2x too big and clipped on HiDPI screens.
+        self._logo.setPixmap(app_icon().pixmap(22, 22))
+        self._logo.setScaledContents(True)
         self._logo.setFixedSize(22, 22)
         tb.addWidget(self._logo)
         tb.addSpacing(8)

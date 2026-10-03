@@ -114,13 +114,13 @@ for s in $icon_sizes; do
     cp "$here/assets/icons/rog-control-$s.png" "$data_home/icons/hicolor/${s}x${s}/apps/rog-control.png"
 done
 
-cat > "$desktop_file" <<'EOF'
+cat > "$desktop_file" <<EOF
 [Desktop Entry]
 Type=Application
 Name=ROG Control
 Comment=Control app for ASUS ROG laptops
 Comment[tr]=ASUS ROG dizüstü bilgisayarlar için kontrol uygulaması
-Exec=rog-control
+Exec=$bin_file
 Icon=rog-control
 Terminal=false
 Categories=Settings;HardwareSettings;System;
