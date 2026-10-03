@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="220" alt="ROG Control logo"></p>
+
 # ROG Control
 
 ASUS ROG dizüstü bilgisayarlar için Linux'ta çalışan, [G-Helper](https://github.com/seerge/g-helper)'dan esinlenmiş bir kontrol merkezi. `asusd` ve `supergfxd` üzerine kuruludur.

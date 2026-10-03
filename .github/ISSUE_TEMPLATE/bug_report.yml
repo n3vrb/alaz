@@ -1,0 +1,31 @@
+name: Bug report / Hata bildirimi
+description: Something doesn't work on your laptop
+labels: [bug]
+body:
+  - type: input
+    id: model
+    attributes: {label: Laptop model, placeholder: "e.g. ROG Zephyrus G16 (2025) GU605"}
+    validations: {required: true}
+  - type: input
+    id: cpu
+    attributes: {label: CPU / GPU, placeholder: "e.g. AMD Ryzen 9 8945HS / RTX 4070"}
+    validations: {required: true}
+  - type: input
+    id: distro
+    attributes: {label: Distro, desktop, kernel, placeholder: "e.g. Fedora 41, GNOME 47 Wayland, 6.12"}
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes: {label: What happened and what did you expect?}
+    validations: {required: true}
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostics
+      description: Paste the output of these commands
+      value: |
+        asusctl --version
+        asusctl -s
+        supergfxctl -V && supergfxctl -s && supergfxctl -g && supergfxctl -S
+        journalctl --user -u rog-control -b --no-pager | tail -50
+      render: text

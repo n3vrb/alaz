@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="220" alt="ROG Control logo"></p>
+
 # ROG Control
 
 A [G-Helper](https://github.com/seerge/g-helper)-inspired control centre for ASUS ROG laptops on Linux, built on top of `asusd` and `supergfxd`.

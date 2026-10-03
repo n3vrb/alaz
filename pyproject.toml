@@ -23,3 +23,6 @@ rog-control = "rog_control.app:main"
 
 [tool.setuptools.packages.find]
 include = ["rog_control*"]
+
+[tool.setuptools.package-data]
+"rog_control.ui" = ["icons/*.png"]

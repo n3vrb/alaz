@@ -4,15 +4,15 @@ Ordered roughly by priority. Each item: why, where, how to verify. Update this f
 discover something. Status as of 2026-10-03. Read `CLAUDE.md` first (hard rules!).
 
 ## 0. Finish if not done (check `git log` / `git status` first)
-- [ ] **English UI (i18n)** — a sub-agent was implementing `rog_control/i18n.py` (Turkish strings as keys, EN catalogue, `ui/language` setting auto|en|tr, Settings → Language), English screenshots in `docs/screenshots/` and Turkish in `docs/screenshots/tr/`, README updates. Verify: whole suite passes; the "no Turkish text in English mode" test exists; look at EN screenshots.
-- [ ] **App identity + new logo** — window shows as "python3" with no icon on GNOME/Wayland.
+- [x] **English UI (i18n)** — done (commit 00871fe). — a sub-agent was implementing `rog_control/i18n.py` (Turkish strings as keys, EN catalogue, `ui/language` setting auto|en|tr, Settings → Language), English screenshots in `docs/screenshots/` and Turkish in `docs/screenshots/tr/`, README updates. Verify: whole suite passes; the "no Turkish text in English mode" test exists; look at EN screenshots.
+- [x] **App identity + new logo** — done: setDesktopFileName, bundled icons in `rog_control/ui/icons/`, installer installs hicolor PNGs. Owner must reinstall + restart the service to see it. — window shows as "python3" with no icon on GNOME/Wayland.
   - Logo source files are ready in `assets/`: `assets/logo.png` (full logo + wordmark, for README), `assets/rog-control.png` (512 px app icon), `assets/icons/rog-control-{16..512}.png`. The old `assets/icon.svg` is obsolete.
   - Code: in `rog_control/app.py` call `QGuiApplication.setDesktopFileName("rog-control")` (Wayland app_id = desktop file name, so GNOME picks up the name + icon), `setApplicationDisplayName("ROG Control")`, set the window icon from the PNG sizes (QIcon with all sizes); use it in the title bar (`ui/windows/_base.py`) and as the tray fallback icon (`ui/windows/tray.py`) instead of the old SVG.
   - `install.sh`: install PNGs to `~/.local/share/icons/hicolor/<s>x<s>/apps/rog-control.png` (drop the scalable SVG), keep `Icon=rog-control`, add `StartupWMClass=rog-control` to the desktop entry; uninstall removes them.
   - README.md / README.tr.md: show `assets/logo.png` at the top.
   - Verify: tests; after the owner reinstalls + restarts the service, the dock/alt-tab shows "ROG Control" with the logo.
-- [ ] **CONTRIBUTING.md + issue templates** (`.github/ISSUE_TEMPLATE/bug_report.yml`) asking for: model, CPU (Intel/AMD), distro/kernel, `asusctl -s`, `supergfxctl -s/-g`, `journalctl --user -u rog-control -b`. A friend with an AMD ROG laptop may open PRs.
-- [ ] Commit, then push only when the owner asks; bump `actions/checkout@v4` → `@v5` in `.github/workflows/tests.yml` (Node 20 deprecation warning).
+- [x] **CONTRIBUTING.md + issue templates** — done. (`.github/ISSUE_TEMPLATE/bug_report.yml`) asking for: model, CPU (Intel/AMD), distro/kernel, `asusctl -s`, `supergfxctl -s/-g`, `journalctl --user -u rog-control -b`. A friend with an AMD ROG laptop may open PRs.
+- [x] checkout@v5 bumped. Push only when the owner asks; bump `actions/checkout@v4` → `@v5` in `.github/workflows/tests.yml` (Node 20 deprecation warning).
 
 ## 1. CPU limiting (deferred by the owner — ask before starting)
 **Finding (2026-10-03, verified):** on the reference Intel model, asusd `PptPl1Spl/PptPl2Sppt` ARE written

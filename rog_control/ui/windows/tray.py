@@ -23,6 +23,11 @@ BAT_STATUS = {"Charging": "Şarj oluyor", "Discharging": "Boşalıyor", "Full": 
 
 
 def make_icon(accent: str) -> QIcon:
+    """Tray icon when no watts are shown: the application logo."""
+    from rog_control.ui.app_icon import app_icon
+    icon = app_icon()
+    if not icon.isNull():
+        return icon
     pm = QPixmap(64, 64)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)

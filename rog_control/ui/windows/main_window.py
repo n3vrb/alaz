@@ -5,7 +5,7 @@ import logging
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QMenu, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
 
 from rog_control.i18n import tr
 from rog_control.ui import theme
@@ -60,8 +60,15 @@ class MainWindow(FramelessWindow):
     def _build(self) -> None:
         tb = self.titlebar.lay
         tb.setContentsMargins(16, 0, 8, 0)
-        self._logo = IconLabel("logo", self._accent, 18, 2.2)
+        from rog_control.ui.app_icon import app_icon
+        self._logo = QLabel()
+        dpr = self.devicePixelRatioF() or 1.0
+        pm = app_icon().pixmap(int(22 * dpr), int(22 * dpr))
+        pm.setDevicePixelRatio(dpr)
+        self._logo.setPixmap(pm)
+        self._logo.setFixedSize(22, 22)
         tb.addWidget(self._logo)
+        tb.addSpacing(8)
         tb.addWidget(self.title_label("ROG Control"))
         tb.addWidget(label("Zephyrus", 12, 400, theme.TEXT3))
         tb.addStretch(1)
@@ -200,7 +207,6 @@ class MainWindow(FramelessWindow):
         self.apply_enabled()
 
     def accent_applied(self, accent: str) -> None:
-        self._logo.set_color(accent)
         self.pill.set(PERF_LABEL.get(self.state.perf_mode, ""), accent)
         self.gpu_header.set_accent(accent)
         self.pending.set_accent(self._pending_color())

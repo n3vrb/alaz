@@ -38,7 +38,8 @@ fi
 app_dir="$data_home/rog-control"
 bin_file="$HOME/.local/bin/rog-control"
 desktop_file="$data_home/applications/rog-control.desktop"
-icon_file="$data_home/icons/hicolor/scalable/apps/rog-control.svg"
+icon_file="$data_home/icons/hicolor/scalable/apps/rog-control.svg"  # legacy, removed
+icon_sizes="16 24 32 48 64 128 256 512"
 autostart_file="$config_home/autostart/rog-control.desktop"
 unit_dir="$config_home/systemd/user"
 unit_file="$unit_dir/rog-control.service"
@@ -61,6 +62,7 @@ if [ "$uninstall" -eq 1 ]; then
     sctl daemon-reload >/dev/null 2>&1 || true
     rm -rf "$app_dir"
     rm -f "$bin_file" "$desktop_file" "$icon_file" "$autostart_file"
+    for s in $icon_sizes; do rm -f "$data_home/icons/hicolor/${s}x${s}/apps/rog-control.png"; done
     refresh_caches
     if [ "$purge" -eq 1 ]; then
         rm -rf "$config_home/rog-control"
@@ -86,7 +88,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 # --- install ---------------------------------------------------------------
-mkdir -p "$data_home" "$HOME/.local/bin" "$data_home/applications" "$(dirname "$icon_file")"
+mkdir -p "$data_home" "$HOME/.local/bin" "$data_home/applications"
 tmp="$app_dir.new.$$"
 rm -rf "$tmp"
 mkdir -p "$tmp"
@@ -106,7 +108,11 @@ EOF
 chmod 0755 "$bin_file.tmp"
 mv "$bin_file.tmp" "$bin_file"
 
-cp "$here/assets/icon.svg" "$icon_file"
+rm -f "$icon_file"
+for s in $icon_sizes; do
+    mkdir -p "$data_home/icons/hicolor/${s}x${s}/apps"
+    cp "$here/assets/icons/rog-control-$s.png" "$data_home/icons/hicolor/${s}x${s}/apps/rog-control.png"
+done
 
 cat > "$desktop_file" <<'EOF'
 [Desktop Entry]

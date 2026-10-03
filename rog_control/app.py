@@ -220,6 +220,12 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("rog-control")
     app.setOrganizationName("rog-control")
+    # Wayland app_id = desktop file name: lets GNOME match rog-control.desktop, so the
+    # dock / alt-tab show "ROG Control" with its icon instead of "python3".
+    app.setDesktopFileName("rog-control")
+    app.setApplicationDisplayName("ROG Control")
+    from rog_control.ui.app_icon import app_icon
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
 
     guard = SingleInstance(FAKE_INSTANCE_NAME if args.fake else INSTANCE_NAME)
