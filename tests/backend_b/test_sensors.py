@@ -36,7 +36,8 @@ class Smi:
 
 def sampler(tmp_path, smi, clock=lambda: 0.0, own_pid=None):
     return S.Sampler(str(tmp_path / "pci"), str(tmp_path / "hwmon"), str(tmp_path / "ps"), smi, clock,
-                     str(tmp_path / "proc"), own_pid if own_pid is not None else 999999)
+                     str(tmp_path / "proc"), own_pid if own_pid is not None else 999999,
+                     rapl_root=str(tmp_path / "rapl"))
 
 
 def add_proc(tmp_path, pid, comm="game", target="/dev/nvidia0"):
@@ -195,3 +196,93 @@ def test_compositor_holders_are_not_gpu_users(tmp_path):
     smi = Smi()
     assert sampler(tmp_path, smi).gpu() == ("active", None, None, None)
     assert smi.calls == 0
+
+
+# ---- RAPL psys -------------------------------------------------------------
+def rapl_tree(tmp_path, energy="1000000", name="psys", idx=1, mode=None):
+    d = tmp_path / "rapl" / f"intel-rapl:{idx}"
+    d.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "rapl" / "intel-rapl:0").mkdir(exist_ok=True)
+    w(tmp_path / "rapl" / "intel-rapl:0" / "name", "package-0")
+    w(d / "name", name)
+    w(d / "max_energy_range_uj", "1000000000")
+    w(d / "energy_uj", energy)
+    if mode is not None:
+        os.chmod(d / "energy_uj", mode)
+    return d
+
+
+class Clock:
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_psys_delta_and_first_sample(tmp_path):
+    d = rapl_tree(tmp_path, "1000000")
+    clk = Clock()
+    r = S.PsysReader(str(tmp_path / "rapl"), clk)
+    assert r.read() is None and r.available is True      # first sample
+    clk.t += 2.0
+    w(d / "energy_uj", "31000000")                       # 30 J in 2 s
+    assert r.read() == pytest.approx(15.0)
+
+
+def test_psys_wrap(tmp_path):
+    d = rapl_tree(tmp_path, "999000000")
+    clk = Clock()
+    r = S.PsysReader(str(tmp_path / "rapl"), clk)
+    r.read()
+    clk.t += 1.0
+    w(d / "energy_uj", "29000000")                       # wrapped: 1e9-999e6+29e6 = 30e6 uJ
+    assert r.read() == pytest.approx(30.0)
+
+
+def test_psys_found_by_name_not_index(tmp_path):
+    rapl_tree(tmp_path, idx=3)
+    r = S.PsysReader(str(tmp_path / "rapl"), Clock())
+    r.read()
+    assert r.available is True
+
+
+def test_psys_missing_domain(tmp_path):
+    rapl_tree(tmp_path, name="dram")
+    r = S.PsysReader(str(tmp_path / "rapl"), Clock())
+    assert r.read() is None and r.available is False
+
+
+def test_psys_permission_retry_every_60s(tmp_path, monkeypatch):
+    d = rapl_tree(tmp_path, "1000000")
+    clk = Clock()
+    r = S.PsysReader(str(tmp_path / "rapl"), clk)
+    real_open = open
+    denied = {"on": True, "opens": 0}
+
+    def fake_open(path, *a, **k):
+        if str(path).endswith("energy_uj"):
+            denied["opens"] += 1
+            if denied["on"]:
+                raise PermissionError(13, "denied")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    assert r.read() is None and r.available is False and denied["opens"] == 1
+    clk.t += 30
+    assert r.read() is None and denied["opens"] == 1      # no retry before 60 s
+    clk.t += 31
+    denied["on"] = False                                  # rule installed meanwhile
+    assert r.read() is None and r.available is True       # opened again, first sample
+    clk.t += 1
+    w(d / "energy_uj", "11000000")
+    assert r.read() == pytest.approx(10.0)
+
+
+def test_sampler_exposes_psys(tmp_path):
+    rapl_tree(tmp_path)
+    s = sampler(tmp_path, Smi())
+    snap = s.sample()
+    assert snap.psys_available is True and snap.system_power_w is None
+    snap = sampler(tmp_path / "nothing", Smi()).sample()
+    assert snap.psys_available is False and snap.system_power_w is None

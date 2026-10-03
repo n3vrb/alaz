@@ -213,7 +213,8 @@ class MainWindow(FramelessWindow):
         self.sensor.update(cpu_temp=s.cpu_temp, cpu_load=s.cpu_load, gpu_state=s.gpu_state, gpu_temp=s.gpu_temp,
                            gpu_load=s.gpu_load, gpu_power_w=s.gpu_power_w, fans=s.fans_rpm, ram_pct=s.ram_pct,
                            battery_pct=s.battery_pct, battery_status=s.battery_status, on_ac=s.on_ac,
-                           battery_power_w=getattr(s, "battery_power_w", None))
+                           battery_power_w=getattr(s, "battery_power_w", None),
+                           system_power_w=getattr(s, "system_power_w", None))
         self._refresh_battery_text()
 
     def _pending_color(self) -> str:

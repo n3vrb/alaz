@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidg
 
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import AccentMixin, IconButton, make_button
-from rog_control.ui.power_text import PowerSmoother, power_text, source_text
+from rog_control.ui.power_text import PowerView, compose_power, source_text
 from rog_control.ui.widgets.icons import draw_icon, icon_pixmap
 
 DASH = "—"
@@ -261,7 +261,7 @@ class SensorPanel(QWidget, AccentMixin):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._cpu_model = ""
-        self._smoother = PowerSmoother(5)
+        self._smoother = PowerView(5)
         root = QVBoxLayout(self)
         root.setContentsMargins(1, 1, 1, 1)
         root.setSpacing(0)
@@ -315,12 +315,13 @@ class SensorPanel(QWidget, AccentMixin):
 
     @staticmethod
     def _bind(cpu_temp=None, cpu_load=None, gpu_state=None, gpu_temp=None, gpu_load=None, gpu_power_w=None,
-              fans=None, ram_pct=None, battery_pct=None, battery_status=None, on_ac=None, battery_power_w=None):
+              fans=None, ram_pct=None, battery_pct=None, battery_status=None, on_ac=None, battery_power_w=None,
+              system_power_w=None):
         return (cpu_temp, cpu_load, gpu_state, gpu_temp, gpu_load, gpu_power_w, fans, ram_pct, battery_pct,
-                battery_status, on_ac, battery_power_w)
+                battery_status, on_ac, battery_power_w, system_power_w)
 
     def _apply(self, cpu_temp, cpu_load, gpu_state, gpu_temp, gpu_load, gpu_power_w, fans, ram_pct, battery_pct,
-               battery_status, on_ac, battery_power_w=None) -> None:
+               battery_status, on_ac, battery_power_w=None, system_power_w=None) -> None:
         a = self._accent
         # CPU
         self._cpu.set_value(DASH if cpu_temp is None else f"{cpu_temp:.0f}", "" if cpu_temp is None else "°C")
@@ -357,14 +358,14 @@ class SensorPanel(QWidget, AccentMixin):
         self._fan.sub.setText(f"GPU {DASH if g is None else int(g)} · MID {DASH if m is None else int(m)}")
         # bottom row
         self._ram.setText(f"RAM {strong_(DASH if ram_pct is None else f'{ram_pct:.0f} %')}")
+        sys_w, chg_w = self._smoother.push(system_power_w, battery_power_w, battery_status)
         pil = f"Pil {strong_(DASH if battery_pct is None else f'{battery_pct:.0f} %')}"
-        if battery_status:
+        if battery_status and chg_w is None:  # "Şarj +M W" already says it is charging; keep the row short
             pil += f" · {_BATT.get(battery_status, battery_status)}"
         self._bat.setText(pil)
         self._ac_icon.setVisible(on_ac is not None)
         self._ac_icon.set_icon("plug" if on_ac else "battery")
-        watts = self._smoother.push(battery_power_w, battery_status)
-        src, ptxt = source_text(on_ac), power_text(watts, battery_status)
+        src, ptxt = source_text(on_ac), compose_power(sys_w, chg_w)
         self._ac.setText(" · ".join(p for p in (src, strong_(ptxt) if ptxt else None) if p))
         self._last = (cpu_temp, cpu_load, gpu_state)
 

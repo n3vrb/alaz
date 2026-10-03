@@ -1,5 +1,6 @@
 """Live power-draw text: one pure formatter plus a tiny moving-average smoother.
 
+With RAPL psys: "Sistem N W" always (+ " · Şarj +M W" while charging). Fallback without psys:
 Discharging -> whole-system draw ("Sistem 26 W"); charging -> battery charge power ("Şarj +65 W");
 anything else (full / not charging / unknown) -> no watts. Never invents a value.
 """
@@ -38,6 +39,16 @@ def power_line(watts: float | None, status: str | None, on_ac: bool | None, sep:
     return sep.join(p for p in (source_text(on_ac), power_text(watts, status)) if p)
 
 
+def compose_power(system_w: float | None, charge_w: float | None) -> str | None:
+    """'Sistem 48 W · Şarj +40 W' / 'Sistem 31 W' / 'Şarj +65 W' / None."""
+    parts = []
+    if system_w is not None:
+        parts.append(f"Sistem {system_w:.0f} W")
+    if charge_w is not None:
+        parts.append(f"Şarj +{charge_w:.0f} W")
+    return " · ".join(parts) or None
+
+
 class PowerSmoother:
     """Moving average over the last `n` samples; resets when the battery status changes."""
 
@@ -53,3 +64,22 @@ class PowerSmoother:
             return None
         self._buf.append(watts)
         return sum(self._buf) / len(self._buf)
+
+
+class PowerView:
+    """Smooths both numbers (5 samples) and picks the source.
+
+    system: RAPL psys when available (AC or battery); otherwise the battery discharge power
+    (which on battery equals system draw). charge: battery power while charging.
+    """
+
+    def __init__(self, n: int = 5):
+        self._sys = PowerSmoother(n)
+        self._chg = PowerSmoother(n)
+
+    def push(self, system_w: float | None, battery_w: float | None,
+             status: str | None) -> tuple[float | None, float | None]:
+        if system_w is None and status == "Discharging":
+            system_w = battery_w
+        charge = battery_w if status == "Charging" else None
+        return self._sys.push(system_w, status), self._chg.push(charge, status)

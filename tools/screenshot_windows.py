@@ -52,16 +52,18 @@ def main() -> int:
     st, ctl = make("turbo")
     st.set_sensors(fake_sensors(cpu_temp=81, cpu_load=74, gpu_state="active", gpu_temp=67, gpu_load=55, gpu_power_w=48,
                                 fans_rpm={"cpu": 4900, "gpu": 4700, "mid": 5200}, ram_pct=61, battery_pct=44,
-                                battery_status="Discharging", on_ac=False, battery_power_w=58.7))
+                                battery_status="Discharging", on_ac=False, battery_power_w=58.7, system_power_w=58.7))
     st.set_gfx(power="active")
     theme.apply(app, st.accent)
     snap(app, MainWindow(st, ctl, settings), out / "main_turbo.png")
 
     st, ctl = make("balanced")
-    st.set_sensors(fake_sensors(battery_pct=62, battery_status="Charging", on_ac=True, battery_power_w=65.2))
+    st.set_sensors(fake_sensors(battery_pct=62, battery_status="Charging", on_ac=True, battery_power_w=65.2,
+                                system_power_w=104.0))
     snap(app, MainWindow(st, ctl, settings), out / "main_ac_charging.png")
     snap(app, MiniWindow(st, ctl), out / "mini_ac_charging.png")
-    st.set_sensors(fake_sensors(battery_pct=71, battery_status="Discharging", on_ac=False, battery_power_w=26.4))
+    st.set_sensors(fake_sensors(battery_pct=71, battery_status="Discharging", on_ac=False, battery_power_w=26.4,
+                                system_power_w=26.4))
     snap(app, MainWindow(st, ctl, settings), out / "main_battery.png")
     snap(app, MiniWindow(st, ctl), out / "mini_battery.png")
 

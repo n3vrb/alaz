@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from rog_control.ui import theme
@@ -18,6 +19,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_AUTOSTART = Path(os.path.expanduser("~/.config/autostart/rog-control.desktop"))
 KEY_TRAY = "ui/minimize_to_tray"
 KEY_NOTIFY = "ui/notify_profile"
+KEY_TRAY_WATTS = "ui/tray_watts"
+
+
+def install_command(root: Path = PROJECT_ROOT) -> str:
+    return "sudo " + shlex.quote(str(Path(root) / "helper" / "install.sh"))
 
 
 def desktop_entry(root: Path = PROJECT_ROOT) -> str:
@@ -47,7 +53,7 @@ def set_autostart(path: Path, on: bool, root: Path = PROJECT_ROOT) -> None:
 class SettingsWindow(FramelessWindow):
     def __init__(self, state, controller, settings: QSettings, autostart_path: Path | None = None,
                  project_root: Path = PROJECT_ROOT, parent: QWidget | None = None):
-        super().__init__(state, controller, "ROG Control — Ayarlar", 480, 270, back=True, parent=parent)
+        super().__init__(state, controller, "ROG Control — Ayarlar", 480, 400, back=True, parent=parent)
         self.settings = settings
         self.autostart_path = Path(autostart_path) if autostart_path else DEFAULT_AUTOSTART
         self.project_root = project_root
@@ -65,24 +71,43 @@ class SettingsWindow(FramelessWindow):
         self.sw_autostart = ToggleSwitch("Oturum açılışında başlat", "Giriş yapınca tepside küçültülmüş açılır")
         self.sw_tray = ToggleSwitch("Kapatınca tepsiye küçült", "Pencereyi kapatmak uygulamayı çalışır halde bırakır")
         self.sw_notify = ToggleSwitch("Profil değişince bildirim göster", "Fn tuşu gibi dış değişikliklerde")
-        for i, sw in enumerate((self.sw_autostart, self.sw_tray, self.sw_notify)):
+        self.sw_watts = ToggleSwitch("Tepside watt göster", "Tepsi simgesinde toplam güç (W) yazar")
+        for i, sw in enumerate((self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts)):
             sw.setMinimumHeight(48)
             p.lay.addWidget(sw)
-            if i < 2:
+            if i < 3:
                 p.lay.addWidget(hline())
         lay.addWidget(p)
+        self.psys_info = label("", 11.5, 400, theme.TEXT2)
+        self.psys_info.setWordWrap(True)
+        self.psys_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(self.psys_info)
         self.note = label("", 11.5, 400, theme.TEXT3)
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
         lay.addStretch(1)
-        self.track_accent(self.sw_autostart, self.sw_tray, self.sw_notify)
+        self.track_accent(self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts)
 
         self.sw_autostart.setChecked(autostart_enabled(self.autostart_path))
         self.sw_tray.setChecked(settings.value(KEY_TRAY, True, type=bool))
         self.sw_notify.setChecked(settings.value(KEY_NOTIFY, True, type=bool))
+        self.sw_watts.setChecked(settings.value(KEY_TRAY_WATTS, True, type=bool))
+        self.sw_watts.toggled.connect(lambda on: self._save(KEY_TRAY_WATTS, on))
+        state.sensorsChanged.connect(lambda s: self._refresh_psys(s))
+        self._refresh_psys(state.sensors)
         self.sw_autostart.toggled.connect(self._autostart)
         self.sw_tray.toggled.connect(lambda on: self._save(KEY_TRAY, on))
         self.sw_notify.toggled.connect(lambda on: self._save(KEY_NOTIFY, on))
+
+    def _refresh_psys(self, snap) -> None:
+        avail = getattr(snap, "psys_available", None)
+        if avail is True:
+            self.psys_info.setText("Toplam güç: RAPL psys")
+        elif avail is False:
+            self.psys_info.setText("Toplam güç ölçümü için izin gerekli. Terminalde çalıştırın:\n"
+                                   + install_command(self.project_root))
+        else:
+            self.psys_info.setText("")
 
     def _save(self, key: str, on: bool) -> None:
         self.settings.setValue(key, bool(on))

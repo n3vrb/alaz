@@ -476,3 +476,47 @@ def test_chart_uses_edited_profile_colour_not_active_accent(env, qtbot):
     assert w.chart._accent == PERF_COLOR["custom"]
     st.set_perf_mode("quiet")                    # active accent change must not recolour the chart
     assert w.chart._accent == PERF_COLOR["custom"] and w._accent == st.accent
+
+
+def test_settings_tray_watts_toggle_and_psys_info(env, tmp_path):
+    st, ctl, settings = env
+    w = SettingsWindow(st, ctl, settings, autostart_path=tmp_path / "a.desktop", project_root=tmp_path / "p q")
+    assert w.sw_watts.isChecked() and settings.value("ui/tray_watts", True, type=bool) is True
+    w.sw_watts.setChecked(False, emit=True)
+    assert settings.value("ui/tray_watts", True, type=bool) is False
+    w2 = SettingsWindow(st, ctl, settings, autostart_path=tmp_path / "a.desktop")
+    assert not w2.sw_watts.isChecked()
+    st.set_sensors(fake_sensors(psys_available=False))
+    assert "izin gerekli" in w.psys_info.text() and "install.sh" in w.psys_info.text()
+    assert "'" in w.psys_info.text()                    # path with a space is quoted
+    st.set_sensors(fake_sensors(psys_available=True))
+    assert w.psys_info.text() == "Toplam güç: RAPL psys"
+
+
+def test_tray_icon_watts_updates_only_on_integer_change(env):
+    from rog_control.ui.windows.tray import watts_pixmap
+    st, ctl, settings = env
+    clk = [1000.0]
+    t = Tray(st, ctl, settings, clock=lambda: clk[0])
+    for _ in range(5):                                   # steady 34 W
+        clk[0] += 1.0
+        st.set_sensors(fake_sensors(system_power_w=34.0))
+    assert t._icon_watts == 34 and t.icon_updates == 1
+    st.set_sensors(fake_sensors(system_power_w=34.2))    # smoothed value still rounds to 34
+    assert t.icon_updates == 1
+    t._icon_at = clk[0]                                  # pretend we just redrew
+    clk[0] += 0.3                                        # integer changes but <1 s since last redraw
+    for _ in range(5):
+        st.set_sensors(fake_sensors(system_power_w=40.0))
+    assert t.icon_updates == 1
+    clk[0] += 1.0
+    st.set_sensors(fake_sensors(system_power_w=40.0))
+    assert t._icon_watts == 40 and t.icon_updates == 2
+    st.set_sensors(fake_sensors(system_power_w=None, battery_status="Full", battery_power_w=None))
+    assert t._icon_watts is None                         # back to the logo
+    assert watts_pixmap(34, 22).toImage() != watts_pixmap(35, 22).toImage()
+    settings.setValue("ui/tray_watts", False)
+    clk[0] += 5
+    for _ in range(6):
+        st.set_sensors(fake_sensors(system_power_w=50.0))
+    assert t._icon_watts is None

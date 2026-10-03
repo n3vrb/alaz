@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from PyQt6.QtCore import QObject, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import (QAction, QActionGroup, QColor, QFont, QFontMetricsF, QIcon, QPainter, QPainterPath,
+                         QPen, QPixmap, QTransform)
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from rog_control.ui import theme
-from rog_control.ui.power_text import PowerSmoother, power_text
+from rog_control.ui.power_text import PowerView, compose_power
 from rog_control.ui.widgets.icons import draw_icon
 from rog_control.ui.windows import dialogs
 from rog_control.ui.windows._base import (GPU_LABEL, PERF_KEYS, PERF_LABEL, fmt_num, request_perf,
@@ -32,16 +34,67 @@ def make_icon(accent: str) -> QIcon:
     return QIcon(pm)
 
 
+KEY_TRAY_WATTS = "ui/tray_watts"
+ICON_SIZES = (22, 32, 44, 64)
+
+
+def watts_pixmap(watts: int, size: int) -> QPixmap:
+    """Bold white digits with a dark outline on a transparent square, filling the icon."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    text = str(max(0, int(watts)))
+    font = QFont("Sans Serif")
+    font.setBold(True)
+    font.setWeight(QFont.Weight.Black)
+    font.setPixelSize(100)
+    path = QPainterPath()
+    path.addText(0, 0, font, text)
+    br = path.boundingRect()
+    margin = max(1.0, size / 16)
+    outline = max(1.2, size / 11)
+    box = size - 2 * margin - outline
+    sx = box / br.width()
+    sy = min(box / br.height(), sx * 1.4)   # stretch tall digits a little so 2-3 digits stay legible
+    t = QTransform()
+    t.translate(size / 2, size / 2)
+    t.scale(sx, sy)
+    t.translate(-br.center().x(), -br.center().y())
+    path = t.map(path)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(0, 0, 0, 215), outline)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawPath(path)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(250, 250, 250))
+    p.drawPath(path)
+    p.end()
+    return pm
+
+
+def make_watts_icon(watts: int) -> QIcon:
+    icon = QIcon()
+    for sz in ICON_SIZES:
+        icon.addPixmap(watts_pixmap(watts, sz))
+    return icon
+
+
 class Tray(QObject):
     openMainRequested = pyqtSignal()
     miniRequested = pyqtSignal()
     quitRequested = pyqtSignal()
 
-    def __init__(self, state, controller, settings, parent: QObject | None = None):
+    def __init__(self, state, controller, settings, parent: QObject | None = None, clock=time.monotonic):
         super().__init__(parent)
         self.state, self.ctl, self.settings = state, controller, settings
-        self._power = PowerSmoother(5)
-        self._power_w: float | None = None
+        self._clock = clock
+        self._power = PowerView(5)
+        self._power_w: tuple[float | None, float | None] = (None, None)
+        self._icon_watts: int | None = None   # integer currently drawn in the tray icon
+        self._icon_at = -1e9
+        self.icon_updates = 0
         self.icon = QSystemTrayIcon(make_icon(state.accent), self)
         self.menu = QMenu()
         self.menu.setStyleSheet(
@@ -54,7 +107,7 @@ class Tray(QObject):
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self._activated)
         state.perfModeChanged.connect(self._on_perf)
-        state.accentChanged.connect(lambda a: self.icon.setIcon(make_icon(a)))
+        state.accentChanged.connect(self._on_accent)
         state.sensorsChanged.connect(self._on_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
         self._refresh_perf()
@@ -130,10 +183,35 @@ class Tray(QObject):
         for k, a in self.gpu_actions.items():
             a.setChecked(k == g)
 
+    def _on_accent(self, accent: str) -> None:
+        if self._icon_watts is None:
+            self.icon.setIcon(make_icon(accent))
+
     def _on_sensors(self, s) -> None:
         if s is not None:
-            self._power_w = self._power.push(getattr(s, "battery_power_w", None), s.battery_status)
+            self._power_w = self._power.push(getattr(s, "system_power_w", None),
+                                             getattr(s, "battery_power_w", None), s.battery_status)
+        self._update_icon()
         self._refresh_info()
+
+    def _update_icon(self) -> None:
+        """Draw the system watts in the tray icon: at most 1x/s and only when the integer changes."""
+        sys_w = self._power_w[0]
+        want = None
+        if sys_w is not None and self.settings.value(KEY_TRAY_WATTS, True, type=bool):
+            want = int(round(sys_w))
+        if want == self._icon_watts:
+            return
+        now = self._clock()
+        if want is None:
+            self._icon_watts = None
+            self.icon.setIcon(make_icon(self.state.accent))
+        elif now - self._icon_at >= 1.0:
+            self._icon_watts, self._icon_at = want, now
+            self.icon.setIcon(make_watts_icon(want))
+        else:
+            return
+        self.icon_updates += 1
 
     def _refresh_info(self) -> None:
         s = self.state.sensors
@@ -149,7 +227,7 @@ class Tray(QObject):
         self.info.setText(f"CPU {fmt_num(s.cpu_temp)} °C · Fan {fmt_num(rpm)} rpm{bat}")
         gpu = {"sleep": "Uyku", "off": "Kapalı"}.get(s.gpu_state, f"{fmt_num(s.gpu_temp)} °C")
         tip = f"ROG Control — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm"
-        ptxt = power_text(self._power_w, s.battery_status)
+        ptxt = compose_power(*self._power_w)
         self.icon.setToolTip(tip + (f"\nGüç: {ptxt}" if ptxt else ""))
 
     def _on_perf(self, mode: str) -> None:

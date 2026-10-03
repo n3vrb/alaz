@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 SYSFS_PCI = "/sys/bus/pci/devices"
 SYSFS_HWMON = "/sys/class/hwmon"
 SYSFS_POWER = "/sys/class/power_supply"
+SYSFS_RAPL = "/sys/class/powercap"
+PSYS_RETRY_S = 60.0
 NVIDIA_VENDOR = 0x10DE
 SMI_BACKOFF_S = 30.0
 SMI_MIN_INTERVAL_S = 5.0
@@ -47,6 +49,8 @@ class SensorSnapshot:
     battery_status: str | None = None
     on_ac: bool | None = None
     battery_power_w: float | None = None
+    system_power_w: float | None = None   # RAPL psys: whole-platform draw, valid on AC and battery
+    psys_available: bool | None = None    # None = not probed yet
 
 
 def _read(path: str) -> str | None:
@@ -134,6 +138,60 @@ def read_power(root: str = SYSFS_POWER) -> tuple[float | None, str | None, bool 
     return pct, status, on_ac, watts
 
 
+def find_psys(root: str = SYSFS_RAPL) -> str | None:
+    """Locate the RAPL ``psys`` (platform) domain by name; the index differs between machines."""
+    for d in sorted(glob.glob(os.path.join(root, "intel-rapl:*"))):
+        if _read(os.path.join(d, "name")) == "psys":
+            return d
+    return None
+
+
+class PsysReader:
+    """Platform power from the RAPL psys energy counter (delta / monotonic dt).
+
+    ``energy_uj`` is root-only until the udev rule from helper/ is installed, so a
+    PermissionError marks the domain unavailable and the open is retried at most every
+    ``PSYS_RETRY_S`` seconds (picks up the rule without restarting the app).
+    """
+
+    def __init__(self, root: str = SYSFS_RAPL, clock=time.monotonic, retry_s: float = PSYS_RETRY_S):
+        self.root, self._clock, self._retry_s = root, clock, retry_s
+        self.available: bool | None = None
+        self._retry_at: float | None = None
+        self._last: tuple[float, float] | None = None  # (energy_uj, time)
+
+    def _fail(self, now: float) -> None:
+        self.available = False
+        self._retry_at = now + self._retry_s
+        self._last = None
+
+    def read(self) -> float | None:
+        now = self._clock()
+        if self._retry_at is not None and now < self._retry_at:
+            return None
+        dom = find_psys(self.root)
+        if dom is None:
+            self._fail(now)
+            return None
+        try:
+            with open(os.path.join(dom, "energy_uj")) as f:
+                energy = float(f.read().strip())
+        except (OSError, ValueError):
+            self._fail(now)
+            return None
+        self.available, self._retry_at = True, None
+        last, self._last = self._last, (energy, now)
+        if last is None or now <= last[1]:
+            return None
+        delta = energy - last[0]
+        if delta < 0:  # counter wrapped
+            rng = _read_num(os.path.join(dom, "max_energy_range_uj"))
+            if rng is None:
+                return None
+            delta += rng
+        return delta / 1e6 / (now - last[1])
+
+
 def _num(s: str) -> float | None:
     try:
         return float(s)
@@ -200,7 +258,9 @@ class Sampler:
 
     def __init__(self, pci_root: str = SYSFS_PCI, hwmon_root: str = SYSFS_HWMON,
                  power_root: str = SYSFS_POWER, smi=query_nvidia_smi, clock=time.monotonic,
-                 proc_root: str = PROC_ROOT, own_pid: int | None = None):
+                 proc_root: str = PROC_ROOT, own_pid: int | None = None,
+                 rapl_root: str = SYSFS_RAPL):
+        self._psys = PsysReader(rapl_root, clock)
         self.pci_root, self.hwmon_root, self.power_root = pci_root, hwmon_root, power_root
         self._smi = smi
         self._clock = clock
@@ -258,6 +318,8 @@ class Sampler:
         (snap.battery_pct, snap.battery_status,
          snap.on_ac, snap.battery_power_w) = read_power(self.power_root)
         (snap.gpu_state, snap.gpu_temp, snap.gpu_load, snap.gpu_power_w) = self.gpu()
+        snap.system_power_w = self._psys.read()
+        snap.psys_available = self._psys.available
         return snap
 
 
