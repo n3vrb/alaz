@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication
 
 from rog_control.app import SingleInstance, parse_args
 from rog_control.backend.types import FanCurve
+from rog_control.ui import theme
 from rog_control.ui.windows import dialogs
 from rog_control.ui.windows._fake import FakeController, FakeState, fake_sensors
 from rog_control.ui.windows.fans_window import FansWindow
@@ -520,3 +521,37 @@ def test_tray_icon_watts_updates_only_on_integer_change(env):
     for _ in range(6):
         st.set_sensors(fake_sensors(system_power_w=50.0))
     assert t._icon_watts is None
+
+
+def test_eco_exit_flow(env, monkeypatch):
+    st, ctl, settings = env
+    st.set_gfx(active="eco", boot="eco", dgpu_disabled=True)
+    w = MainWindow(st, ctl, settings)
+    w.show()
+    asked = []
+    answers = iter([True, False])           # confirm leaving Eco, then "Sonra" on the reboot prompt
+    monkeypatch.setattr(dialogs, "ask", lambda parent, title, text, ok="Tamam", cancel="Vazgeç", *a, **k:
+                        asked.append((title, text, ok, cancel)) or next(answers))
+    w.gpu_row.clicked.emit("standard")
+    assert ("request_gpu_mode", ("standard",)) in ctl.calls
+    assert "yeniden başlat" in asked[0][1].lower() and "dGPU" in asked[0][1]
+    # immediate reboot prompt, user says later
+    assert asked[1][2:] == ("Yeniden başlat", "Sonra") and not ctl.rebooted
+    assert not w.pending.isHidden()
+    assert w._pending_color() == theme.WARN_ACCENT
+    assert w.pending._cancel.isHidden()
+    # "Yeniden başlat" path
+    monkeypatch.setattr(dialogs, "ask", lambda *a, **k: True)
+    ctl.gpuRebootRequired.emit()
+    assert ctl.rebooted
+
+
+def test_enter_eco_stays_pending_without_prompt(env, monkeypatch):
+    st, ctl, settings = env
+    w = MainWindow(st, ctl, settings)
+    w.show()
+    asked = []
+    monkeypatch.setattr(dialogs, "ask", lambda *a, **k: asked.append(a) or True)
+    w.gpu_row.clicked.emit("eco")
+    assert len(asked) == 1 and not ctl.rebooted
+    assert not w.pending.isHidden() and not w.pending._cancel.isHidden()

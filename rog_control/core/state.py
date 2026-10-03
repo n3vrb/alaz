@@ -26,7 +26,7 @@ class GfxView:
     power: str = "unknown"           # "sleep" | "active" | "off" | "unknown"
     dgpu_disabled: bool | None = None
     mux_direct: bool | None = None
-    can_eco_exit: bool = False
+    can_eco_exit: bool = True
 
 
 @dataclass

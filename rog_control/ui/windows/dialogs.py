@@ -12,6 +12,9 @@ from rog_control.ui.widgets import make_button
 log = logging.getLogger(__name__)
 
 GPU_NAMES = {"eco": "Eco", "standard": "Standart"}
+ECO_EXIT_TEXT = ("dGPU şimdi yeniden etkinleştirilecek ve bilgisayarı hemen ardından yeniden başlatman "
+                 "GEREKİYOR. Yeniden başlatana kadar yeni bir USB/Thunderbolt aygıtı takma. "
+                 "Açık işlerini kaydetmeye hazır mısın?")
 
 
 class ConfirmDialog(QDialog):
@@ -51,8 +54,11 @@ def ask(parent: QWidget | None, title: str, text: str, ok_text: str = "Tamam", c
     return dlg.exec() == QDialog.DialogCode.Accepted
 
 
-def confirm_gpu_change(parent: QWidget | None, mode: str, accent: str = theme.DEFAULT_ACCENT) -> bool:
+def confirm_gpu_change(parent: QWidget | None, mode: str, accent: str = theme.DEFAULT_ACCENT,
+                       leaving_eco: bool = False) -> bool:
     name = GPU_NAMES.get(mode, mode)
+    if leaving_eco:
+        return ask(parent, "Eco modundan çık", ECO_EXIT_TEXT, "Devam", "Vazgeç", accent)
     return ask(parent, f"GPU modu: {name}",
                f"{name} moduna geçiş yeniden başlatınca uygulanır; şu an hiçbir şey değişmez. "
                "İstediğin zaman yeniden başlatmadan önce iptal edebilirsin.",
@@ -65,16 +71,26 @@ def confirm_reboot(parent: QWidget | None, accent: str = theme.DEFAULT_ACCENT) -
                "Yeniden başlat", "Vazgeç", accent)
 
 
-def request_gpu_mode(parent: QWidget | None, controller, mode: str, accent: str = theme.DEFAULT_ACCENT) -> bool:
+def confirm_reboot_after_eco_exit(parent: QWidget | None, accent: str = theme.DEFAULT_ACCENT) -> bool:
+    return ask(parent, "Yeniden başlatma gerekli",
+               "dGPU yeniden etkinleştirildi. Standart modun çalışması için bilgisayarı şimdi yeniden "
+               "başlatman gerekiyor. Açık işlerini kaydettiğinden emin ol.",
+               "Yeniden başlat", "Sonra", accent)
+
+
+def request_gpu_mode(parent: QWidget | None, controller, mode: str, accent: str = theme.DEFAULT_ACCENT,
+                     leaving_eco: bool = False) -> bool:
     """Confirm, then ask the controller for a boot-time GPU mode change. Returns True if requested."""
-    if confirm_gpu_change(parent, mode, accent):
+    if confirm_gpu_change(parent, mode, accent, leaving_eco):
         controller.request_gpu_mode(mode)
         return True
     return False
 
 
-def reboot_now(parent: QWidget | None, controller, accent: str = theme.DEFAULT_ACCENT) -> bool:
-    if confirm_reboot(parent, accent):
+def reboot_now(parent: QWidget | None, controller, accent: str = theme.DEFAULT_ACCENT,
+               after_eco_exit: bool = False) -> bool:
+    confirm = confirm_reboot_after_eco_exit if after_eco_exit else confirm_reboot
+    if confirm(parent, accent):
         controller.reboot_now()
         return True
     return False

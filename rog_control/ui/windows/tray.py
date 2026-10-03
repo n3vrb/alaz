@@ -164,7 +164,8 @@ class Tray(QObject):
 
     def _gpu(self, key: str) -> None:
         if key != self.state.gfx.active:
-            dialogs.request_gpu_mode(None, self.ctl, key, self.state.accent)
+            dialogs.request_gpu_mode(None, self.ctl, key, self.state.accent,
+                                     leaving_eco=(key == "standard" and self.state.gfx.active == "eco"))
         self._refresh_gfx()  # restore the radio state; the real change only happens after reboot
 
     def _activated(self, reason) -> None:

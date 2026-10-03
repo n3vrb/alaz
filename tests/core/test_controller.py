@@ -250,7 +250,7 @@ def test_gfx_view_mapping(env):
     g = env.state.gfx
     assert (g.active, g.boot, g.pending) == ("eco", "standard", "standard")
     assert g.dgpu_disabled is True and g.mux_direct is False
-    assert g.can_eco_exit is False and g.power == "sleep"
+    assert g.can_eco_exit is True and g.power == "sleep"
 
 
 def test_gfx_no_pending_and_mux_direct(env):
@@ -279,22 +279,49 @@ def test_request_eco_success(env):
     assert env.busy == [("gpu", True), ("gpu", False)]
 
 
-def test_request_standard_exit3(env):
+def test_eco_exit_success_requires_immediate_reboot(env):
     env.gfx.mode = GfxMode.INTEGRATED
     env.gfx.boot = GfxMode.INTEGRATED
-    env.gfx.reply = (False, "Eco'dan çıkış henüz desteklenmiyor, hiçbir şey yazılmadı")
+    env.gfx.dgpu = True
+    env.gfx.reply = (True, '{"ok": true, "eco_exit": true}')
     env.ctl.start()
+    fired = []
+    env.ctl.gpuRebootRequired.connect(lambda: fired.append(1))
     env.ctl.request_gpu_mode("standard")
-    level, text = env.msgs[-1]
-    assert level == "warn" and "Windows" in text and "desteklenmiyor" in text
-    assert env.state.gfx.pending is None
+    assert env.gfx.requests == [GfxMode.HYBRID]
+    assert fired == [1]
+    assert env.state.gfx.pending == "standard"
+    lvl, text = env.msgs[-1]
+    assert lvl == "info" and "ŞİMDİ" in text and "yeniden başlat" in text
 
 
-def test_request_exit3_by_code_text(env):
-    env.gfx.reply = (False, "helper exited with code 3")
+def test_hybrid_to_eco_does_not_fire_reboot_signal(env):
     env.ctl.start()
+    fired = []
+    env.ctl.gpuRebootRequired.connect(lambda: fired.append(1))
+    env.ctl.request_gpu_mode("eco")
+    assert fired == []
+
+
+@pytest.mark.parametrize("code,needle", [(7, "supergfxd durdurulamadı"), (8, "dGPU açılamadı")])
+def test_eco_exit_error_codes(env, code, needle):
+    env.gfx.mode = GfxMode.INTEGRATED
+    env.gfx.boot = GfxMode.INTEGRATED
+    env.gfx.reply = (False, "stderr")
+    env.gfx.last_exit_code = code
+    env.ctl.start()
+    fired = []
+    env.ctl.gpuRebootRequired.connect(lambda: fired.append(1))
     env.ctl.request_gpu_mode("standard")
-    assert env.msgs[-1][0] == "warn" and "Eco'dan çıkış" in env.msgs[-1][1]
+    assert env.msgs[-1][0] == "error" and needle in env.msgs[-1][1]
+    assert fired == []
+
+
+def test_exit_code_fallback_from_text():
+    from rog_control.core.controller import _helper_exit_code
+    assert _helper_exit_code("x supergfxd durdurulamadı y") == 7
+    assert _helper_exit_code("Eco'dan çıkış tamamlanamadı: z") == 8
+    assert _helper_exit_code("helper exited with code 3") == 3
 
 
 def test_request_exit4(env):
@@ -483,7 +510,8 @@ def test_aura_state(env):
 @pytest.mark.parametrize("code,level,needle", [
     (126, "info", "iptal"),            # user dismissed the pkexec dialog
     (127, "error", "install.sh"),      # not authorised / helper missing
-    (3, "warn", "Eco'dan çıkış"),      # helper refused Eco exit
+    (7, "error", "supergfxd"),
+    (8, "error", "Eco'dan çıkış tamamlanamadı"),
     (4, "warn", "MUX"),
 ])
 def test_gpu_exit_code_from_last_exit_code(env, code, level, needle):

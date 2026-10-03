@@ -134,6 +134,11 @@ class PendingCard(_Frame, AccentMixin):
     def set_reboot_enabled(self, on: bool) -> None:
         self._reboot.setEnabled(on)
 
+    def set_urgent(self, on: bool) -> None:
+        """Warning tone: reboot is required (no way to cancel)."""
+        self._cancel.setVisible(not on)
+        self._icon.set_icon("warning" if on else "refresh")
+
     def set_color(self, hex_color: str) -> None:
         self.set_accent(hex_color)
 

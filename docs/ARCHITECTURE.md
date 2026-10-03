@@ -161,9 +161,9 @@ Widget'lar (her biri bağımsız, backend import ETMEZ): `ModeTile`, `ModeTileRo
 ### `helper/` (Dalga 1-D)
 `rog-control-gfx-helper set-boot-mode {integrated|hybrid}` (root, pkexec):
 - `/etc/supergfxd.conf` JSON'unu okur, sadece `"mode"` alanını değiştirir (`Integrated`/`Hybrid`), atomik yazar (tmp + rename), yedek tutar.
-- `hybrid` iken ve `dgpu_disable == 1` ise: Eco'dan çıkış prosedürü (bkz. PHASE0 — HENÜZ TEST EDİLMEDİ) → bu sürümde
-  **sadece config'i yazar ve çıkış kodu 3 + açıklama ile "Eco'dan çıkış henüz desteklenmiyor" döner**; sysfs'e yazmaz.
-- Asla `supergfxctl -m`, `systemctl`, reboot çağırmaz. Girdi doğrulaması sıkı; bilinmeyen argüman → çıkış 2.
+- `hybrid` iken ve `dgpu_disable == 1` ise: test edilmiş Eco-çıkış prosedürü (PHASE0 son bölüm): config→Hybrid, `/usr/bin/systemctl stop supergfxd.service`, `drivers_autoprobe=0`, `dgpu_disable=0`, doğrula.
+  Başarıda `{"ok":true,"boot_mode":"Hybrid","reboot_required":true,"eco_exit":true}`; yeniden başlatma HEMEN gerekir. Kodlar: 7 = supergfxd durdurulamadı (config geri alındı), 8 = sysfs yazma/doğrulama hatası (autoprobe geri alınır, config Hybrid kalır), 3 = ayrılmış/kullanılmıyor.
+- Asla `supergfxctl -m` ya da reboot çağırmaz; tek alt süreç yukarıdaki systemctl stop (mutlak yol, temiz env, shell yok). Girdi doğrulaması sıkı; bilinmeyen argüman → çıkış 2.
 `org.rogcontrol.gfx.policy`: `auth_admin_keep`. `install.sh`: helper'ı `/usr/local/libexec/`, policy'yi `/usr/share/polkit-1/actions/` altına kopyalar (çalıştırmak kullanıcıya kalır).
 
 ---
@@ -221,7 +221,7 @@ def set_auto_profile(self, on_ac: str, on_battery: str)   # ThrottlePolicyOnAc/O
 def set_kbd_brightness(self, level: int); def set_kbd_color(self, rgb: tuple[int,int,int])
 ```
 Kurallar: her yazma `busyChanged(key, True/False)` ile sarılır; hata → `message("error", Türkçe açıklama)`; hiçbir çağrı bloklamaz;
-GPU için sadece `gfx.request_boot_mode` (helper) — helper çıkış kodu 3 → "Eco'dan çıkış henüz desteklenmiyor…" mesajı;
+GPU için sadece `gfx.request_boot_mode` (helper) — Eco çıkışı başarılırsa `gpuRebootRequired` sinyali (UI hemen yeniden başlatma sorar), kod 7/8 → Türkçe hata;
 `ultimate` ve `optimize` şimdilik desteklenmez (UI devre dışı + tooltip).
 
 ### `ui/windows/` (Dalga 2-F)

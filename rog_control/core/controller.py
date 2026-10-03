@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any, Callable
 
-from PyQt6.QtCore import QObject, QSettings, QTimer
+from PyQt6.QtCore import QObject, QSettings, QTimer, pyqtSignal
 from PyQt6.QtDBus import QDBusConnection
 
 from ..backend import dbus_util
@@ -76,14 +76,19 @@ def _helper_exit_code(message: str) -> int | None:
     m = re.search(r"code (\d+)", message)
     if m:
         return int(m.group(1))
-    if "Eco'dan çıkış" in message or "Leaving Eco" in message:
-        return 3
+    if "supergfxd durdurulamadı" in message or "could not stop supergfxd" in message:
+        return 7
+    if "Eco'dan çıkış tamamlanamadı" in message or "Eco exit failed" in message:
+        return 8
     if "MUX" in message:
         return 4
     return None
 
 
 class Controller(QObject):
+    # Emitted after a successful Eco exit: the dGPU is back and a reboot is REQUIRED NOW.
+    gpuRebootRequired = pyqtSignal()
+
     def __init__(
         self,
         state: AppState,
@@ -314,7 +319,7 @@ class Controller(QObject):
             active=active, boot=boot, pending=pending, power=power,
             dgpu_disabled=self.gfx.dgpu_disabled(),
             mux_direct=self._read_mux_direct(),
-            can_eco_exit=False,
+            can_eco_exit=True,
         ))
 
     def request_gpu_mode(self, mode: str) -> None:
@@ -332,6 +337,7 @@ class Controller(QObject):
         self._request_boot(_VIEW_TO_GFX[active], active, cancel=True)
 
     def _request_boot(self, gfx_mode: GfxMode, name: str, cancel: bool) -> None:
+        leaving_eco = (not cancel and name == "standard" and self.state.gfx.active == "eco")
         self.state.emit_busy("gpu", True)
 
         def done(ok: bool, msg: str) -> None:
@@ -340,6 +346,11 @@ class Controller(QObject):
             if ok:
                 if cancel:
                     self.state.emit_message("info", "Bekleyen GPU değişikliği iptal edildi.")
+                elif leaving_eco:
+                    self.state.emit_message(
+                        "info", "dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı ŞİMDİ "
+                        "yeniden başlatman gerekiyor.")
+                    self.gpuRebootRequired.emit()
                 else:
                     label = {"eco": "Eco", "standard": "Standart"}[name]
                     self.state.emit_message("info", f"{label} yeniden başlatınca etkin olacak.")
@@ -354,11 +365,16 @@ class Controller(QObject):
                     "error",
                     "GPU yardımcısı çalıştırılamadı: yetki verilmedi ya da kurulu değil "
                     "(kurulum: sudo helper/install.sh).")
-            elif code == 3:
+            elif code == 7:
                 self.state.emit_message(
-                    "warn",
-                    "Eco'dan çıkış henüz desteklenmiyor; hiçbir şey değiştirilmedi. "
-                    "Şu an geri dönmenin yolu Windows'ta G-Helper → Standart seçmektir.")
+                    "error",
+                    "supergfxd durdurulamadı; Eco'dan çıkış başlatılmadı ve yapılandırma geri alındı. "
+                    "Hiçbir şey değişmedi.")
+            elif code == 8:
+                self.state.emit_message(
+                    "error",
+                    "Eco'dan çıkış tamamlanamadı: dGPU açılamadı. Yapılandırma Standart olarak kaldı; "
+                    "yeniden başlatırsan bilgisayar güvenle Eco'da açılır.")
             elif code == 4:
                 self.state.emit_message(
                     "warn",

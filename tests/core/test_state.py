@@ -6,7 +6,7 @@ def test_defaults():
     assert s.perf_mode == "balanced"
     assert s.accent == "#4C8DFF"
     assert s.gfx == GfxView()
-    assert s.gfx.can_eco_exit is False
+    assert s.gfx.can_eco_exit is True
     assert s.display == DisplayView()
     assert s.battery_limit is None
     assert s.sensors is None

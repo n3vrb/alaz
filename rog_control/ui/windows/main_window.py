@@ -104,6 +104,8 @@ class MainWindow(FramelessWindow):
         self.gpu_desc = label("", 12, 400, theme.TEXT2)
         self.pending = PendingCard()
         self.pending.rebootClicked.connect(lambda: dialogs.reboot_now(self, self.ctl, self._accent))
+        if hasattr(self.ctl, "gpuRebootRequired"):
+            self.ctl.gpuRebootRequired.connect(self._eco_exit_reboot_prompt)
         self.pending.cancelClicked.connect(lambda: self.ctl.cancel_gpu_pending())
         self.pending.hide()
         lay.addLayout(self._section(self.gpu_header, self.gpu_row, self.gpu_desc, self.pending))
@@ -217,9 +219,20 @@ class MainWindow(FramelessWindow):
                            system_power_w=getattr(s, "system_power_w", None))
         self._refresh_battery_text()
 
+    def _reboot_required(self) -> bool:
+        """Eco was left (dGPU re-enabled, drivers_autoprobe off): only a reboot completes it."""
+        g = self.state.gfx
+        return bool(g.pending == "standard" and g.active == "eco" and g.dgpu_disabled is False)
+
     def _pending_color(self) -> str:
         p = self.state.gfx.pending
+        if self._reboot_required():
+            return theme.WARN_ACCENT
         return PERF_COLOR_GPU.get(p, self._accent) if p else self._accent
+
+    def _eco_exit_reboot_prompt(self) -> None:
+        self._refresh_gfx()
+        dialogs.reboot_now(self, self.ctl, self._accent, after_eco_exit=True)
 
     def _refresh_gfx(self) -> None:
         g = self.state.gfx
@@ -230,8 +243,15 @@ class MainWindow(FramelessWindow):
         self.banner.setVisible(show_banner)
         if g.pending:
             name = GPU_LABEL.get(g.pending, g.pending)
-            self.pending.set_content(f"{name} yeniden başlatınca etkin olacak",
-                                     GPU_REBOOT_SUB.get(g.pending, "Açık işlerini kaydet."))
+            urgent = self._reboot_required()
+            if urgent:
+                self.pending.set_content("Yeniden başlatma gerekli",
+                                         "dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı "
+                                         "şimdi yeniden başlat.")
+            else:
+                self.pending.set_content(f"{name} yeniden başlatınca etkin olacak",
+                                         GPU_REBOOT_SUB.get(g.pending, "Açık işlerini kaydet."))
+            self.pending.set_urgent(urgent)
             self.pending.set_accent(self._pending_color())
             self.pending.set_color(self._pending_color())
             self.pending.show()
@@ -316,7 +336,8 @@ class MainWindow(FramelessWindow):
                 self.ctl.cancel_gpu_pending()
             return
         if key in ("eco", "standard"):
-            dialogs.request_gpu_mode(self, self.ctl, key, PERF_COLOR_GPU[key])
+            dialogs.request_gpu_mode(self, self.ctl, key, PERF_COLOR_GPU[key],
+                                     leaving_eco=(key == "standard" and g.active == "eco"))
 
     def _hz_changed(self, key: str) -> None:
         self.ctl.set_refresh(None if key == "auto" else int(key))

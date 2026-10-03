@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from rog_control.ui import theme  # noqa: E402
 from rog_control.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors  # noqa: E402
+from rog_control.ui.windows import dialogs  # noqa: E402
+from rog_control.ui.windows.main_window import PERF_COLOR_GPU  # noqa: E402
 from rog_control.ui.windows.fans_window import FansWindow  # noqa: E402
 from rog_control.ui.windows.keyboard_window import KeyboardWindow  # noqa: E402
 from rog_control.ui.windows.main_window import MainWindow  # noqa: E402
@@ -71,6 +73,24 @@ def main() -> int:
     st.set_gfx(boot="eco", pending="eco")
     theme.apply(app, st.accent)
     snap(app, MainWindow(st, ctl, settings), out / "main_eco_pending.png")
+
+    # Eco exit: eco active -> confirm dialog -> pending (reboot required, warning tone)
+    st, ctl = make("quiet")
+    st.set_gfx(active="eco", boot="eco", dgpu_disabled=True)
+    theme.apply(app, st.accent)
+    w = MainWindow(st, ctl, settings)
+    w.show()
+    app.processEvents()
+    dlg = dialogs.ConfirmDialog(w, "Eco modundan çık", dialogs.ECO_EXIT_TEXT, "Devam", "Vazgeç",
+                                PERF_COLOR_GPU["standard"])
+    dlg.show()
+    app.processEvents()
+    dlg.grab().save(str(out / "eco_exit_confirm.png"))
+    dlg.deleteLater()
+    w.hide()
+    w.deleteLater()
+    st.set_gfx(boot="standard", pending="standard", dgpu_disabled=False)
+    snap(app, MainWindow(st, ctl, settings), out / "eco_exit_pending.png")
 
     st, ctl = make("balanced")
     st.set_gfx(active="eco", boot="standard", dgpu_disabled=True)

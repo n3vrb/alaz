@@ -40,7 +40,7 @@ class GfxView:
     power: str = "sleep"
     dgpu_disabled: bool | None = False
     mux_direct: bool | None = False
-    can_eco_exit: bool = False
+    can_eco_exit: bool = True
 
 
 @dataclass
@@ -150,6 +150,8 @@ class FakeState(QObject):
 
 
 class FakeController(QObject):
+    gpuRebootRequired = pyqtSignal()
+
     def __init__(self, state: FakeState):
         super().__init__()
         self.state = state
@@ -181,6 +183,11 @@ class FakeController(QObject):
 
     def request_gpu_mode(self, mode: str) -> None:
         self._rec("request_gpu_mode", mode)
+        leaving_eco = mode == "standard" and self.state.gfx.active == "eco"
+        if leaving_eco:
+            self.state.set_gfx(boot=mode, pending=mode, dgpu_disabled=False)
+            self.gpuRebootRequired.emit()
+            return
         self.state.set_gfx(boot=mode, pending=mode if mode != self.state.gfx.active else None)
 
     def cancel_gpu_pending(self) -> None:
