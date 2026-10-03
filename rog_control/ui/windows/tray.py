@@ -86,8 +86,10 @@ class Tray(QObject):
     miniRequested = pyqtSignal()
     quitRequested = pyqtSignal()
 
-    def __init__(self, state, controller, settings, parent: QObject | None = None, clock=time.monotonic):
+    def __init__(self, state, controller, settings, parent: QObject | None = None, clock=time.monotonic,
+                 available_fn=None):
         super().__init__(parent)
+        self._available = available_fn or self.available
         self.state, self.ctl, self.settings = state, controller, settings
         self._clock = clock
         self._power = PowerView(5)
@@ -119,7 +121,7 @@ class Tray(QObject):
         return QSystemTrayIcon.isSystemTrayAvailable()
 
     def show(self) -> None:
-        if self.available():
+        if self._available():
             self.icon.show()
 
     def hide(self) -> None:

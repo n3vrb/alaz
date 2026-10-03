@@ -19,3 +19,10 @@ def _reset_quit_flag():
     # request_quit() sets an app-wide property; don't let it leak between tests.
     yield
     _APP.setProperty("rog_quitting", False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_systemd_unit(tmp_path, monkeypatch):
+    # Never let a test see (or act through) the user's real systemd unit.
+    monkeypatch.setattr("rog_control.ui.windows.settings_window.DEFAULT_UNIT",
+                        tmp_path / "no-such-config" / "rog-control.service")

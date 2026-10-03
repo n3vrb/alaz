@@ -1,4 +1,4 @@
-"""SettingsWindow: autostart (.desktop file), minimise to tray, profile-change notifications (QSettings)."""
+"""SettingsWindow: autostart (systemd user unit, XDG .desktop fallback), minimise to tray, profile-change notifications (QSettings)."""
 from __future__ import annotations
 
 import logging
@@ -7,7 +7,7 @@ import shlex
 import shutil
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import QProcess, QSettings, Qt
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from rog_control.ui import theme
@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_AUTOSTART = Path(os.path.expanduser("~/.config/autostart/rog-control.desktop"))
+UNIT_NAME = "rog-control.service"
+DEFAULT_UNIT = Path(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")) / "systemd" / "user" / UNIT_NAME
 KEY_TRAY = "ui/minimize_to_tray"
 KEY_NOTIFY = "ui/notify_profile"
 KEY_TRAY_WATTS = "ui/tray_watts"
@@ -62,13 +64,48 @@ def set_autostart(path: Path, on: bool, root: Path = PROJECT_ROOT, launcher: str
             pass
 
 
+_procs: set = set()
+
+
+def run_systemctl(args: list[str], callback) -> None:
+    """Run `systemctl --user <args>` asynchronously; callback(exit_code, stdout).
+
+    exit_code is -1 if systemctl could not be started. Never blocks the GUI thread.
+    """
+    proc = QProcess()
+    _procs.add(proc)
+
+    def done(*_a) -> None:
+        if proc not in _procs:
+            return
+        _procs.discard(proc)
+        out = bytes(proc.readAllStandardOutput()).decode(errors="replace").strip()
+        code = proc.exitCode() if proc.exitStatus() == QProcess.ExitStatus.NormalExit else -1
+        proc.deleteLater()
+        callback(code, out)
+
+    def failed(_err) -> None:
+        if proc.state() == QProcess.ProcessState.NotRunning and proc in _procs and \
+                proc.error() == QProcess.ProcessError.FailedToStart:
+            _procs.discard(proc)
+            proc.deleteLater()
+            callback(-1, "")
+
+    proc.finished.connect(done)
+    proc.errorOccurred.connect(failed)
+    proc.start("systemctl", ["--user", *args])
+
+
 class SettingsWindow(FramelessWindow):
     def __init__(self, state, controller, settings: QSettings, autostart_path: Path | None = None,
-                 project_root: Path = PROJECT_ROOT, parent: QWidget | None = None):
+                 project_root: Path = PROJECT_ROOT, parent: QWidget | None = None,
+                 unit_path: Path | None = None, systemctl_runner=None):
         super().__init__(state, controller, "ROG Control — Ayarlar", 480, 400, back=True, parent=parent)
         self.settings = settings
         self.autostart_path = Path(autostart_path) if autostart_path else DEFAULT_AUTOSTART
         self.project_root = project_root
+        self.unit_path = Path(unit_path) if unit_path else DEFAULT_UNIT
+        self._systemctl = systemctl_runner or run_systemctl
         tb = self.titlebar.lay
         tb.addWidget(self.title_label("Ayarlar"))
         tb.addStretch(1)
@@ -100,7 +137,7 @@ class SettingsWindow(FramelessWindow):
         lay.addStretch(1)
         self.track_accent(self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts)
 
-        self.sw_autostart.setChecked(autostart_enabled(self.autostart_path))
+        self._init_autostart_state()
         self.sw_tray.setChecked(settings.value(KEY_TRAY, True, type=bool))
         self.sw_notify.setChecked(settings.value(KEY_NOTIFY, True, type=bool))
         self.sw_watts.setChecked(settings.value(KEY_TRAY_WATTS, True, type=bool))
@@ -125,11 +162,47 @@ class SettingsWindow(FramelessWindow):
         self.settings.setValue(key, bool(on))
         self.settings.sync()
 
+    def _use_systemd(self) -> bool:
+        return self.unit_path.is_file()
+
+    def _init_autostart_state(self) -> None:
+        if not self._use_systemd():
+            self.sw_autostart.setChecked(autostart_enabled(self.autostart_path))
+            return
+
+        def got(code: int, out: str) -> None:
+            self.sw_autostart.setChecked(code == 0 and out.strip() == "enabled")
+
+        self._systemctl(["is-enabled", UNIT_NAME], got)
+
     def _autostart(self, on: bool) -> None:
+        on = bool(on)
+        if self._use_systemd():
+            self._autostart_systemd(on)
+            return
         try:
-            set_autostart(self.autostart_path, bool(on), self.project_root)
+            set_autostart(self.autostart_path, on, self.project_root)
             self.note.setText("")
         except OSError as e:
             log.error("autostart write failed: %s", e)
             self.sw_autostart.setChecked(autostart_enabled(self.autostart_path))
             self.note.setText(f"Otomatik başlatma ayarlanamadı: {e}")
+
+    def _autostart_systemd(self, on: bool) -> None:
+        def done(code: int, _out: str) -> None:
+            if code != 0:
+                log.error("systemctl --user %s failed (exit %s)", "enable" if on else "disable", code)
+                self.sw_autostart.setChecked(not on)
+                self.note.setText("Otomatik başlatma ayarlanamadı (systemctl --user başarısız).")
+                return
+            self.note.setText("")
+            if on:
+                try:   # avoid a double start next to the old XDG entry
+                    self.autostart_path.unlink()
+                    log.info("removed legacy autostart entry %s", self.autostart_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    log.warning("could not remove %s: %s", self.autostart_path, e)
+
+        self._systemctl(["enable" if on else "disable", UNIT_NAME], done)

@@ -12,10 +12,15 @@ described with :class:`Typed` (method arguments) or :class:`Variant`
 (``v`` arguments such as the value of ``Properties.Set``) and converted at send
 time into a ``QDBusArgument`` built with explicit metatype ids.
 
-Quirk: the very first ``QDBusArgument`` that goes through ``QDBusConnection.send``
-in a process fails to marshal ("Unregistered type PyQt_PyObject").  ``send``
-therefore performs a one-time, harmless warm-up (a Peer.Ping addressed to our
-own unique bus name) before the first real message.
+Quirk (reproduced in a fresh process on a private bus): the very first message
+carrying a ``QDBusArgument`` that goes through ``QDBusConnection.asyncCall`` in a
+process fails to marshal locally ("Unregistered type PyQt_PyObject") and is never
+sent; every later one works.  Building a QDBusArgument/QDBusMessage locally does
+NOT avoid it.  So the first call performs a one-time sacrificial call that is
+addressed to the bus daemon itself (``org.freedesktop.DBus``): normally it fails
+locally and nothing is sent; if the quirk is ever fixed it reaches the bus
+daemon, which answers with a harmless error and never logs a policy rejection
+(unlike a self-addressed call on the system bus).
 """
 from __future__ import annotations
 
@@ -174,18 +179,19 @@ _pending: set[QDBusPendingCallWatcher] = set()
 
 
 def _warm_up(bus: QDBusConnection) -> None:
+    """One-time sacrificial typed call to the bus daemon (see module docstring)."""
     global _warmed_up
     if _warmed_up:
         return
     _warmed_up = True
     try:
-        arg = QDBusArgument()
-        arg.add(0, QMetaType.Type.UChar.value)
         msg = QDBusMessage.createMethodCall(
-            bus.baseService(), "/", "org.freedesktop.DBus.Peer", "Ping"
-        )
-        msg.setArguments([arg])
-        bus.send(msg)  # expected to fail marshalling the first time; sends nothing
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner")
+        msg.setArguments(_marshal_args([Typed("y", 0)]))
+        pending = bus.asyncCall(msg, 2000)
+        watcher = QDBusPendingCallWatcher(pending)
+        _pending.add(watcher)
+        watcher.finished.connect(lambda w: (_pending.discard(w), w.deleteLater()))
     except Exception:  # pragma: no cover - defensive
         log.debug("QDBus warm-up failed", exc_info=True)
 

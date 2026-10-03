@@ -104,6 +104,17 @@ cd rog-control
 
 Uygulamayı `~/.local/share/rog-control` altına, başlatıcıyı `~/.local/bin/rog-control` olarak, bir masaüstü girdisi ve bir simge ile birlikte kurar. `~/.local/bin` dizininin `PATH` içinde olduğundan emin ol.
 
+### Oturum açılışında başlatma
+
+```bash
+./install.sh --autostart                  # systemd kullanıcı servisini kurar ve etkinleştirir
+journalctl --user -u rog-control -f       # günlükler
+systemctl --user restart rog-control      # yeniden başlat
+systemctl --user disable --now rog-control   # kapat (veya Ayarlar'daki anahtar)
+```
+
+Servis, oturum açılınca uygulamayı tepside küçültülmüş başlatır (tepsi hazır olana kadar en fazla 20 sn bekler). Hemen başlatmak için `--start` ekle.
+
 ### İlk çalıştırma
 
 Uygulama menüsünden **ROG Control**'ü aç ya da `rog-control` komutunu çalıştır. Performans modları, fan eğrileri, güç limitleri, ekran ve klavye kontrolleri `asusd` çalışır çalışmaz kullanılabilir. GPU modu geçişi ve toplam güç göstergesi için aşağıdaki isteğe bağlı bölüm gerekir.

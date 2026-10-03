@@ -104,6 +104,17 @@ cd rog-control
 
 This installs the app under `~/.local/share/rog-control`, a launcher `~/.local/bin/rog-control`, a desktop entry and an icon. Make sure `~/.local/bin` is on your `PATH`.
 
+### Start at login
+
+```bash
+./install.sh --autostart                  # installs and enables the systemd user service
+journalctl --user -u rog-control -f       # logs
+systemctl --user restart rog-control      # restart
+systemctl --user disable --now rog-control   # turn off (or use the toggle in Settings)
+```
+
+The service starts the app minimised to the tray after login (it waits up to 20 s for the tray host). Add `--start` to also start it right away.
+
 ### First run
 
 Start **ROG Control** from the application menu, or run `rog-control`. Performance modes, fan curves, power limits, display and keyboard controls work as soon as `asusd` is running. GPU mode switching and the total-power readout need the optional part below.
