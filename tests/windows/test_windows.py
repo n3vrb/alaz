@@ -268,10 +268,11 @@ def test_keyboard_window(env):
     assert not w.bright.isEnabled()
 
 
-def test_settings_autostart_file(env, tmp_path):
+def test_settings_autostart_file(env, tmp_path, monkeypatch):
     st, ctl, settings = env
     path = tmp_path / "autostart" / "rog-control.desktop"
     root = tmp_path / "proj"
+    monkeypatch.setattr("rog_control.ui.windows.settings_window._launcher", lambda: None)
     w = SettingsWindow(st, ctl, settings, autostart_path=path, project_root=root)
     assert not path.exists()
     w.sw_autostart.setChecked(True, emit=True)
@@ -285,6 +286,13 @@ def test_settings_autostart_file(env, tmp_path):
     assert settings.value("ui/notify_profile", True, type=bool) is False
     set_autostart(path, False)                          # removing a missing file is fine
     assert not autostart_enabled(path)
+
+
+def test_autostart_uses_launcher_when_installed(tmp_path):
+    path = tmp_path / "a.desktop"
+    set_autostart(path, True, tmp_path / "proj", launcher="/x/rog-control")
+    text = path.read_text()
+    assert "Exec=rog-control --minimized" in text and "Path=" not in text and "python3" not in text
 
 
 def test_mini_window(env):

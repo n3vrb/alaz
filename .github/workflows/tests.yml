@@ -1,0 +1,16 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  pytest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pyqt6 python3-psutil python3-pytest libegl1 libxkbcommon0
+          python3 -m pip install --break-system-packages pytest-qt
+      - name: Run tests
+        run: QT_QPA_PLATFORM=offscreen python3 -m pytest tests -q

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rog-control"
+version = "0.1.0"
+description = "G-Helper-style control app for ASUS ROG laptops on Linux (asusd / supergfxd)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Environment :: X11 Applications :: Qt",
+    "Programming Language :: Python :: 3",
+]
+# On Ubuntu/Zorin prefer the distro packages (python3-pyqt6, python3-psutil);
+# pip dependencies are only used for a pip/venv install.
+dependencies = ["PyQt6>=6.4", "psutil>=5.9"]
+
+[project.scripts]
+rog-control = "rog_control.app:main"
+
+[tool.setuptools.packages.find]
+include = ["rog_control*"]

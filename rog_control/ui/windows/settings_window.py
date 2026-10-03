@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+import shutil
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, Qt
@@ -26,21 +27,32 @@ def install_command(root: Path = PROJECT_ROOT) -> str:
     return "sudo " + shlex.quote(str(Path(root) / "helper" / "install.sh"))
 
 
-def desktop_entry(root: Path = PROJECT_ROOT) -> str:
-    return ("[Desktop Entry]\nType=Application\nName=ROG Control\nComment=ASUS ROG laptop control\n"
-            "Exec=python3 -m rog_control --minimized\n"
-            f"Path={root}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+def _launcher() -> str | None:
+    """Path of an installed `rog-control` launcher (~/.local/bin or PATH), if any."""
+    local = Path(os.path.expanduser("~/.local/bin/rog-control"))
+    if local.is_file() and os.access(local, os.X_OK):
+        return str(local)
+    return shutil.which("rog-control")
+
+
+def desktop_entry(root: Path = PROJECT_ROOT, launcher: str | None = None) -> str:
+    launcher = launcher if launcher is not None else _launcher()
+    head = "[Desktop Entry]\nType=Application\nName=ROG Control\nComment=ASUS ROG laptop control\n"
+    tail = "Terminal=false\nX-GNOME-Autostart-enabled=true\n"
+    if launcher:
+        return head + "Exec=rog-control --minimized\n" + tail
+    return head + "Exec=python3 -m rog_control --minimized\n" + f"Path={root}\n" + tail
 
 
 def autostart_enabled(path: Path) -> bool:
     return Path(path).is_file()
 
 
-def set_autostart(path: Path, on: bool, root: Path = PROJECT_ROOT) -> None:
+def set_autostart(path: Path, on: bool, root: Path = PROJECT_ROOT, launcher: str | None = None) -> None:
     path = Path(path)
     if on:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(desktop_entry(root), encoding="utf-8")
+        path.write_text(desktop_entry(root, launcher), encoding="utf-8")
         log.info("autostart enabled: %s", path)
     else:
         try:
