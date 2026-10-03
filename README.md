@@ -9,7 +9,7 @@ English | [Türkçe](README.tr.md)
 
 > **Status: early, tested on one machine.** Developed and verified on an ASUS ROG Zephyrus (2025) with Core Ultra 9 285H and RTX 5070 Laptop on Zorin OS 18 (GNOME, Wayland). Other models may behave differently. See [Safety and limitations](#8-safety-and-limitations).
 >
-> **The user interface is in Turkish.** Mode names are Sessiz / Dengeli / Turbo / Özel (Silent / Balanced / Turbo / Custom). Translations (i18n) are very welcome.
+> **The interface is available in English and Turkish.** The language follows your system locale (Turkish if it starts with `tr`, otherwise English); change it under Settings → Language (applies after a restart). More translations are welcome: see `rog_control/i18n.py` and `rog_control/i18n_en.py`.
 
 <p align="center">
   <img src="docs/screenshots/main-balanced.png" width="300" alt="Main window, Balanced mode">
@@ -173,14 +173,14 @@ The guide also lists what **not** to do: live `supergfxctl -m`, blacklisting NVI
 - **Ultimate (MUX) and Optimize GPU modes are not supported yet.**
 - Idle draw on the reference machine is about 15 to 16 W on battery (measured; the RAPL `psys` reading is 1 to 2 W higher). `pcie_aspm=off` likely costs some of it but is required on this model (see above).
 - `nvidia-powerd` was not installed on the reference machine, and Dynamic Boost depends on it; the effect of the Dynamic Boost slider there was not investigated.
-- The interface is Turkish only.
+- The interface is available in English and Turkish only (Settings → Language; other languages are welcome as contributions).
 
 ## 9. Development
 
 ```bash
 python3 -m venv .venv --system-site-packages   # or install PyQt6 and psutil in your own venv
 QT_QPA_PLATFORM=offscreen python3 -m pytest tests
-QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots   # render windows with fake state
+QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots --lang en   # render windows with fake state
 ```
 
 The suite has 262 tests (backends, core controller and state, widgets, windows, the root helper) and runs offscreen. **Tests never write to the real system**; write paths are exercised with mocks, fakes and a re-rooted helper (`ROG_CONTROL_HELPER_TESTROOT`, honoured only when not root).

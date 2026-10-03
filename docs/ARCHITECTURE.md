@@ -3,7 +3,7 @@
 Yeni uygulama: `rog_control/` paketi, **PyQt6** (6.6, Qt 6.4), Python 3.12. Çalıştırma: `python3 -m rog_control`.
 Eski `asus_helper/` sadece referanstır; içinden kod **import edilmez** (gerekirse mantık kopyalanır).
 
-Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.dc.html` (B v2). Arayüz metni Türkçe.
+Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.dc.html` (B v2). Arayüz metni İngilizce ve Türkçe: kodda kaynak metin Türkçedir ve `rog_control/i18n.py` içindeki `tr()` ile çevrilir (İngilizce sözlük: `rog_control/i18n_en.py`; dil: QSettings `ui/language` = auto|en|tr, başlangıçta uygulanır). Kullanıcıya görünen her yeni metin `tr(...)` ile sarılmalı ve İngilizce karşılığı eklenmelidir (`tests/test_i18n.py` eksikleri yakalar).
 
 ## Değişmez kurallar (hepsi zorunlu)
 

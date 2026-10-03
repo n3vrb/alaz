@@ -5,6 +5,7 @@ from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import AccentMixin, IconButton, make_button
 from rog_control.ui.power_text import PowerView, compose_power, source_text
@@ -120,8 +121,8 @@ class PendingCard(_Frame, AccentMixin):
         lay.addWidget(self._icon)
         box, self._title, self._sub = _text_block()
         lay.addWidget(box, 1)
-        self._reboot = make_button("Yeniden başlat", "primary", self._accent, 34, 12)
-        self._cancel = make_button("İptal", "ghost", height=34, pad=12)
+        self._reboot = make_button(tr("Yeniden başlat"), "primary", self._accent, 34, 12)
+        self._cancel = make_button(tr("İptal"), "ghost", height=34, pad=12)
         self._reboot.clicked.connect(self.rebootClicked)
         self._cancel.clicked.connect(self.cancelClicked)
         lay.addWidget(self._reboot)
@@ -154,7 +155,7 @@ class Banner(_Frame):
     actionClicked = pyqtSignal()
     closed = pyqtSignal()
 
-    def __init__(self, title: str = "", sub: str = "", action_text: str = "Düzelt", parent: QWidget | None = None):
+    def __init__(self, title: str = "", sub: str = "", action_text: str = "", parent: QWidget | None = None):
         super().__init__(theme.WARN_BG, theme.WARN_BORDER, 10, parent=parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 9, 8, 9)
@@ -162,10 +163,10 @@ class Banner(_Frame):
         lay.addWidget(_IconLabel("warning", theme.WARN_ACCENT, 18, 2.0))
         box, self._title, self._sub = _text_block(theme.WARN_TEXT, 12.5, theme.WARN_SUB, 12)
         lay.addWidget(box, 1)
-        self._action = make_button(action_text, "primary", theme.WARN_ACCENT, 32, 14)
+        self._action = make_button(action_text or tr("Düzelt"), "primary", theme.WARN_ACCENT, 32, 14)
         self._action.clicked.connect(self.actionClicked)
         lay.addWidget(self._action)
-        self._close = IconButton("close", (32, 32), 14, theme.WARN_SUB, tooltip="Uyarıyı kapat")
+        self._close = IconButton("close", (32, 32), 14, theme.WARN_SUB, tooltip=tr("Uyarıyı kapat"))
         self._close.clicked.connect(self.closed)
         lay.addWidget(self._close)
         self.set_content(title, sub)
@@ -277,7 +278,7 @@ class SensorPanel(QWidget, AccentMixin):
         grid.setSpacing(0)
         self._cpu = _Stat("CPU", 16, 14)
         self._gpu = _Stat("GPU", 14, 14)
-        self._fan = _Stat("FANLAR", 14, 16)
+        self._fan = _Stat(tr("FANLAR"), 14, 16)
         for w in (self._cpu, self._gpu, self._fan):
             grid.addWidget(w, 1)
         root.addWidget(cols)
@@ -331,23 +332,23 @@ class SensorPanel(QWidget, AccentMixin):
         # CPU
         self._cpu.set_value(DASH if cpu_temp is None else f"{cpu_temp:.0f}", "" if cpu_temp is None else "°C")
         self._cpu.bar.set_state(None if cpu_load is None else cpu_load / 100, a)
-        parts = [DASH + " % yük" if cpu_load is None else f"{cpu_load:.0f} % yük"]
+        parts = [tr("{value} % yük", value=DASH if cpu_load is None else f"{cpu_load:.0f}")]
         if self._cpu_model:
             parts.append(self._cpu_model)
         self._cpu.sub.setText(" · ".join(parts))
         # GPU
         if gpu_state == "sleep":
-            self._gpu.set_value("Uyku", big_px=22, icon="moon")
+            self._gpu.set_value(tr("Uyku"), big_px=22, icon="moon")
             self._gpu.bar.set_state(None, a)
-            self._gpu.sub.setText("dGPU kapalı" + ("" if gpu_power_w is None else f" · {gpu_power_w:.0f} W"))
+            self._gpu.sub.setText(tr("dGPU kapalı") + ("" if gpu_power_w is None else f" · {gpu_power_w:.0f} W"))
         elif gpu_state == "off":
-            self._gpu.set_value("Kapalı", big_px=22, icon="moon")
+            self._gpu.set_value(tr("Kapalı"), big_px=22, icon="moon")
             self._gpu.bar.set_state(None, a)
-            self._gpu.sub.setText("dGPU devre dışı")
+            self._gpu.sub.setText(tr("dGPU devre dışı"))
         elif gpu_state == "active":
             self._gpu.set_value(DASH if gpu_temp is None else f"{gpu_temp:.0f}", "" if gpu_temp is None else "°C")
             self._gpu.bar.set_state(None if gpu_load is None else gpu_load / 100, a)
-            sub = DASH + " % yük" if gpu_load is None else f"{gpu_load:.0f} % yük"
+            sub = tr("{value} % yük", value=DASH if gpu_load is None else f"{gpu_load:.0f}")
             sub += f" · {DASH} W" if gpu_power_w is None else f" · {gpu_power_w:.0f} W"
             self._gpu.sub.setText(sub)
         else:
@@ -364,9 +365,9 @@ class SensorPanel(QWidget, AccentMixin):
         # bottom row
         self._ram.setText(f"RAM {strong_(DASH if ram_pct is None else f'{ram_pct:.0f} %')}")
         sys_w, chg_w = self._smoother.push(system_power_w, battery_power_w, battery_status)
-        pil = f"Pil {strong_(DASH if battery_pct is None else f'{battery_pct:.0f} %')}"
+        pil = tr("Pil {value}", value=strong_(DASH if battery_pct is None else f"{battery_pct:.0f} %"))
         if battery_status and chg_w is None:  # "Şarj +M W" already says it is charging; keep the row short
-            pil += f" · {_BATT.get(battery_status, battery_status)}"
+            pil += f" · {tr(_BATT.get(battery_status, battery_status))}"
         self._bat.setText(pil)
         self._ac_icon.setVisible(on_ac is not None)
         self._ac_icon.set_icon("plug" if on_ac else "battery")

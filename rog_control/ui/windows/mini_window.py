@@ -6,6 +6,7 @@ import logging
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.power_text import PowerView, compose_power
 from rog_control.ui.widgets._common import IconButton
@@ -19,7 +20,7 @@ class MiniWindow(FramelessWindow):
     expandRequested = pyqtSignal()
 
     def __init__(self, state, controller, parent: QWidget | None = None):
-        super().__init__(state, controller, "ROG Control — Mini", 340, 0, parent=parent)
+        super().__init__(state, controller, tr("ROG Control — Mini"), 340, 0, parent=parent)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         tb = self.titlebar
         tb.setFixedHeight(36)
@@ -35,7 +36,7 @@ class MiniWindow(FramelessWindow):
         tb.lay.addWidget(self.gpu_lbl)
         tb.lay.addStretch(1)
         tb.lay.addWidget(self.pwr_lbl)
-        ex = IconButton("expand", (30, 28), 14, theme.TEXT2, 2.0, "Tam pencereye dön")
+        ex = IconButton("expand", (30, 28), 14, theme.TEXT2, 2.0, tr("Tam pencereye dön"))
         ex.clicked.connect(self.expandRequested)
         tb.lay.addWidget(ex)
 
@@ -92,11 +93,11 @@ class MiniWindow(FramelessWindow):
                                            getattr(s, "battery_power_w", None), s.battery_status)
         full = compose_power(sys_w, chg_w)
         # the mini bar is narrow: headline only, the charge part goes to the tooltip
-        self.pwr_lbl.setText(compose_power(sys_w, None) or full or ("Prizde" if s.on_ac else ""))
+        self.pwr_lbl.setText(compose_power(sys_w, None) or full or (tr("Prizde") if s.on_ac else ""))
         self.pwr_lbl.setToolTip(full or "")
         unit = lambda txt: f'<span style="font-size:12px; color:{theme.TEXT2}; font-weight:400"> {txt}</span>'  # noqa: E731
         self.vals["CPU"].setText(f"{fmt_num(s.cpu_temp)}°" + unit(f"{fmt_num(s.cpu_load)}%"))
-        gpu = {"sleep": "Uyku", "off": "Kapalı", "unknown": "—"}.get(s.gpu_state)
+        gpu = {"sleep": tr("Uyku"), "off": tr("Kapalı"), "unknown": "—"}.get(s.gpu_state)
         self.vals["GPU"].setText(gpu if gpu else f"{fmt_num(s.gpu_temp)}°" + unit(f"{fmt_num(s.gpu_load)}%"))
         rpm = (s.fans_rpm or {}).get("cpu")
         self.vals["FAN"].setText(f"{fmt_num(rpm)}" + unit("rpm"))

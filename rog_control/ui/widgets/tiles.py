@@ -5,6 +5,7 @@ from PyQt6.QtCore import QEasingCurve, QRectF, QSize, Qt, QVariantAnimation, pyq
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QSizePolicy, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import AccentMixin, lerp_color, lighten
 from rog_control.ui.widgets.icons import draw_icon
@@ -128,7 +129,7 @@ class ModeTile(QAbstractButton):
         if self._pending and not self._selected:
             bf = theme.ui_font(10, 700, 0.4)
             p.setFont(bf)
-            txt = "BEKLİYOR"
+            txt = tr("BEKLİYOR")
             w = p.fontMetrics().horizontalAdvance(txt) + 12
             r = QRectF((self.width() - w) / 2, 0, w, 16)
             p.setPen(Qt.PenStyle.NoPen)

@@ -8,6 +8,7 @@ from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QLineEdit, QSizePolicy, QVBoxLayout, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets import Segmented, make_button
 from rog_control.ui.widgets._common import button_qss
@@ -77,9 +78,9 @@ class Swatch(QWidget):
 
 class KeyboardWindow(FramelessWindow):
     def __init__(self, state, controller, parent: QWidget | None = None):
-        super().__init__(state, controller, "ROG Control — Klavye", 480, 350, back=True, parent=parent)
+        super().__init__(state, controller, tr("ROG Control — Klavye"), 480, 350, back=True, parent=parent)
         tb = self.titlebar.lay
-        tb.addWidget(self.title_label("Klavye"))
+        tb.addWidget(self.title_label(tr("Klavye")))
         tb.addStretch(1)
         self.add_window_buttons(minimize=False)
 
@@ -87,14 +88,14 @@ class KeyboardWindow(FramelessWindow):
         lay.setContentsMargins(16, 14, 16, 16)
         lay.setSpacing(14)
 
-        lay.addWidget(section_title("Parlaklık"))
+        lay.addWidget(section_title(tr("Parlaklık")))
         bp = Panel(12)
-        self.bright = Segmented([(k, t) for k, t in BRIGHTNESS], height=32, stretch=True)
+        self.bright = Segmented([(k, tr(t)) for k, t in BRIGHTNESS], height=32, stretch=True)
         self.bright.changed.connect(lambda k: self.ctl.set_kbd_brightness(int(k)))
         bp.lay.addWidget(self.bright)
         lay.addWidget(bp)
 
-        lay.addWidget(section_title("Renk"))
+        lay.addWidget(section_title(tr("Renk")))
         cp = Panel(12)
         cp.lay.setSpacing(12)
         grid = QGridLayout()
@@ -115,11 +116,11 @@ class KeyboardWindow(FramelessWindow):
         self.hex.setMaxLength(7)
         self.hex.setPlaceholderText("#RRGGBB")
         self.hex.setFixedHeight(34)
-        self.hex.setAccessibleName("Renk (hex)")
+        self.hex.setAccessibleName(tr("Renk (hex)"))
         self.hex.textChanged.connect(self._hex_changed)
         self.hex.returnPressed.connect(self._apply)
         row.addWidget(self.hex, 1)
-        self.apply_btn = make_button("Uygula", "primary", self._accent, pad=16)
+        self.apply_btn = make_button(tr("Uygula"), "primary", self._accent, pad=16)
         self.apply_btn.clicked.connect(self._apply)
         row.addWidget(self.apply_btn)
         cp.lay.addLayout(row)

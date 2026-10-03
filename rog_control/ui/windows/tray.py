@@ -9,6 +9,7 @@ from PyQt6.QtGui import (QAction, QActionGroup, QColor, QFont, QFontMetricsF, QI
                          QPen, QPixmap, QTransform)
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.power_text import PowerView, compose_power
 from rog_control.ui.widgets.icons import draw_icon
@@ -137,7 +138,7 @@ class Tray(QObject):
         self.head = self._heading("ROG Control")
         self.info = self._heading("")
         self.menu.addSeparator()
-        self._heading("PERFORMANS")
+        self._heading(tr("PERFORMANS"))
         self.perf_group = QActionGroup(self.menu)
         self.perf_actions: dict[str, QAction] = {}
         for k in PERF_KEYS:
@@ -147,19 +148,19 @@ class Tray(QObject):
             a.triggered.connect(lambda _=False, key=k: request_perf(self.ctl, key))
             self.perf_actions[k] = a
         self.menu.addSeparator()
-        self._heading("GPU MODU")
+        self._heading(tr("GPU MODU"))
         self.gpu_group = QActionGroup(self.menu)
         self.gpu_actions: dict[str, QAction] = {}
-        for k, text in (("standard", "Standart"), ("eco", "Eco   (yeniden başlatma)")):
+        for k, text in (("standard", GPU_LABEL["standard"]), ("eco", tr("Eco   (yeniden başlatma)"))):
             a = self.menu.addAction(text)
             a.setCheckable(True)
             a.setActionGroup(self.gpu_group)
             a.triggered.connect(lambda _=False, key=k: self._gpu(key))
             self.gpu_actions[k] = a
         self.menu.addSeparator()
-        self.act_open = self.menu.addAction("Pencereyi aç")
-        self.act_mini = self.menu.addAction("Mini mod")
-        self.act_quit = self.menu.addAction("Çıkış")
+        self.act_open = self.menu.addAction(tr("Pencereyi aç"))
+        self.act_mini = self.menu.addAction(tr("Mini mod"))
+        self.act_quit = self.menu.addAction(tr("Çıkış"))
         self.act_open.triggered.connect(self.openMainRequested)
         self.act_mini.triggered.connect(self.miniRequested)
         self.act_quit.triggered.connect(self.quitRequested)
@@ -220,22 +221,23 @@ class Tray(QObject):
         s = self.state.sensors
         mode = PERF_LABEL.get(self.state.perf_mode, "")
         if s is None:
-            self.info.setText("Veri yok")
+            self.info.setText(tr("Veri yok"))
             self.icon.setToolTip(f"ROG Control — {mode}")
             return
         rpm = (s.fans_rpm or {}).get("cpu")
         bat = ""
         if s.battery_pct is not None:
-            bat = f" · Pil {s.battery_pct:.0f} %" + (f" {BAT_STATUS.get(s.battery_status or '', '')}" if s.battery_status else "")
+            bat = " · " + tr("Pil {pct} %", pct=f"{s.battery_pct:.0f}") + (
+                f" {tr(BAT_STATUS.get(s.battery_status or '', ''))}" if s.battery_status else "")
         self.info.setText(f"CPU {fmt_num(s.cpu_temp)} °C · Fan {fmt_num(rpm)} rpm{bat}")
-        gpu = {"sleep": "Uyku", "off": "Kapalı"}.get(s.gpu_state, f"{fmt_num(s.gpu_temp)} °C")
+        gpu = {"sleep": tr("Uyku"), "off": tr("Kapalı")}.get(s.gpu_state, f"{fmt_num(s.gpu_temp)} °C")
         tip = f"ROG Control — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm"
         ptxt = compose_power(*self._power_w)
-        self.icon.setToolTip(tip + (f"\nGüç: {ptxt}" if ptxt else ""))
+        self.icon.setToolTip(tip + ("\n" + tr("Güç: {value}", value=ptxt) if ptxt else ""))
 
     def _on_perf(self, mode: str) -> None:
         self._refresh_perf()
         if (seconds_since_local_perf() > 2.5 and self.settings.value("ui/notify_profile", True, type=bool)
                 and self.icon.isVisible()):
-            self.icon.showMessage("ROG Control", f"Profil: {PERF_LABEL.get(mode, mode)}",
+            self.icon.showMessage("ROG Control", tr("Profil: {mode}", mode=PERF_LABEL.get(mode, mode)),
                                   QSystemTrayIcon.MessageIcon.Information, 3000)

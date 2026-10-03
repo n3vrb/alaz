@@ -26,3 +26,12 @@ def _no_real_systemd_unit(tmp_path, monkeypatch):
     # Never let a test see (or act through) the user's real systemd unit.
     monkeypatch.setattr("rog_control.ui.windows.settings_window.DEFAULT_UNIT",
                         tmp_path / "no-such-config" / "rog-control.service")
+
+
+@pytest.fixture(autouse=True)
+def _ui_language_tr():
+    # Most tests assert the Turkish source strings; English-mode tests opt in via set_language("en").
+    from rog_control import i18n
+    i18n.set_language("tr")
+    yield
+    i18n.set_language("tr")

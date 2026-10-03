@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Render every window offscreen to PNG using the fakes.
 
-    QT_QPA_PLATFORM=offscreen .venv/bin/python tools/screenshot_windows.py [OUT_DIR]
+    QT_QPA_PLATFORM=offscreen .venv/bin/python tools/screenshot_windows.py [OUT_DIR] [--lang en|tr]
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 from pathlib import Path
@@ -14,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+from rog_control import i18n  # noqa: E402
+from rog_control.i18n import tr  # noqa: E402
 from rog_control.ui import theme  # noqa: E402
 from rog_control.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors  # noqa: E402
 from rog_control.ui.windows import dialogs  # noqa: E402
@@ -42,7 +45,12 @@ def make(perf: str = "balanced"):
 
 
 def main() -> int:
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix="rog-shots-"))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("out", nargs="?", help="output directory (default: a temp dir)")
+    ap.add_argument("--lang", choices=("en", "tr"), default="tr", help="UI language to render (default: tr)")
+    args = ap.parse_args()
+    i18n.set_language(args.lang)
+    out = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="rog-shots-"))
     out.mkdir(parents=True, exist_ok=True)
     app = QApplication(sys.argv[:1])
     theme.apply(app)
@@ -81,7 +89,7 @@ def main() -> int:
     w = MainWindow(st, ctl, settings)
     w.show()
     app.processEvents()
-    dlg = dialogs.ConfirmDialog(w, "Eco modundan çık", dialogs.ECO_EXIT_TEXT, "Devam", "Vazgeç",
+    dlg = dialogs.ConfirmDialog(w, tr("Eco modundan çık"), tr(dialogs.ECO_EXIT_TEXT), tr("Devam"), tr("Vazgeç"),
                                 PERF_COLOR_GPU["standard"])
     dlg.show()
     app.processEvents()

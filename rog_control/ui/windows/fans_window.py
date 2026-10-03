@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QHBoxLayout, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout,
                              QWidget)
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets import FanCurveChart, Segmented, ValueSlider, make_button
 from rog_control.ui.widgets._common import button_qss
@@ -77,7 +78,7 @@ class ChipButton(QAbstractButton):
 
 class FansWindow(FramelessWindow):
     def __init__(self, state, controller, parent: QWidget | None = None):
-        super().__init__(state, controller, "ROG Control — Fanlar & Güç", 480, 920, back=True, parent=parent)
+        super().__init__(state, controller, tr("ROG Control — Fanlar & Güç"), 480, 920, back=True, parent=parent)
         self.edit_mode = state.perf_mode
         self.fan = "CPU"
         self._reset_sel = True
@@ -97,7 +98,7 @@ class FansWindow(FramelessWindow):
     # ------------------------------------------------------------------ build
     def _build(self) -> None:
         tb = self.titlebar.lay
-        tb.addWidget(self.title_label("Fanlar & Güç"))
+        tb.addWidget(self.title_label(tr("Fanlar & Güç")))
         tb.addStretch(1)
         self.temp_lbl = label("", 12, 400, theme.TEXT3, rich=True)
         tb.addWidget(self.temp_lbl)
@@ -127,7 +128,7 @@ class FansWindow(FramelessWindow):
         lay.setSpacing(14)
 
         # DÜZENLENEN PROFİL
-        lay.addWidget(section_title("Düzenlenen profil"))
+        lay.addWidget(section_title(tr("Düzenlenen profil")))
         row = QHBoxLayout()
         row.setSpacing(8)
         self.profile_btns: dict[str, ChoiceButton] = {}
@@ -143,7 +144,7 @@ class FansWindow(FramelessWindow):
         cp.lay.setContentsMargins(12, 12, 12, 10)
         cp.lay.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(section_title("Fan eğrisi"))
+        top.addWidget(section_title(tr("Fan eğrisi")))
         top.addStretch(1)
         self.fan_seg = Segmented([("CPU", "CPU", "—"), ("GPU", "GPU", "—"), ("MID", "MID", "—")], height=28, pad=10)
         self.fan_seg.set_current("CPU")
@@ -160,8 +161,8 @@ class FansWindow(FramelessWindow):
         self.note.setWordWrap(True)
         self.note.setMinimumWidth(10)
         bot.addWidget(self.note, 1)
-        self.btn_default = make_button("Varsayılan", "secondary")
-        self.btn_apply = make_button("Uygula", "primary", PERF_COLOR[self.edit_mode], pad=16)
+        self.btn_default = make_button(tr("Varsayılan"), "secondary")
+        self.btn_apply = make_button(tr("Uygula"), "primary", PERF_COLOR[self.edit_mode], pad=16)
         self.btn_default.clicked.connect(self._reset_curves)
         self.btn_apply.clicked.connect(self._apply_curve)
         bot.addWidget(self.btn_default)
@@ -174,7 +175,7 @@ class FansWindow(FramelessWindow):
         pp.lay.setContentsMargins(12, 12, 12, 12)
         pp.lay.setSpacing(10)
         head = QHBoxLayout()
-        head.addWidget(section_title("CPU güç limitleri"))
+        head.addWidget(section_title(tr("CPU güç limitleri")))
         head.addStretch(1)
         self.limit_badge = label("", 11.5, 600)
         self.limit_badge.setFixedHeight(22)
@@ -188,9 +189,9 @@ class FansWindow(FramelessWindow):
         self.pl_sliders: list[ValueSlider] = []
         get_limits = getattr(self.ctl, "custom_limits", None)
         pl = tuple(get_limits()) if callable(get_limits) else DEFAULT_PL
-        for lab, sub, lo, hi, v in (("PL1 · SPL", "Sürekli güç", 15, 120, pl[0]),
-                                   ("PL2 · SPPT", "Kısa süreli", 15, 150, pl[1]),
-                                   ("FPPT", "Anlık tepe", 15, 170, pl[2])):
+        for lab, sub, lo, hi, v in (("PL1 · SPL", tr("Sürekli güç"), 15, 120, pl[0]),
+                                   ("PL2 · SPPT", tr("Kısa süreli"), 15, 150, pl[1]),
+                                   ("FPPT", tr("Anlık tepe"), 15, 170, pl[2])):
             s = ValueSlider(lab, sub, lo, hi, 1, " W")
             s.setValue(v)
             s.committed.connect(lambda _v: self._commit_limits())
@@ -198,7 +199,7 @@ class FansWindow(FramelessWindow):
             self.pl_sliders.append(s)
         self.custom_hint = label("", 11.5, 400, theme.TEXT3)
         self.custom_hint.setWordWrap(True)
-        self.btn_enable_custom = make_button("Özel modu etkinleştir", "secondary", height=30)
+        self.btn_enable_custom = make_button(tr("Özel modu etkinleştir"), "secondary", height=30)
         self.btn_enable_custom.clicked.connect(lambda: request_perf(self.ctl, "custom"))
         hint_row = QHBoxLayout()
         hint_row.addWidget(self.custom_hint, 1)
@@ -215,7 +216,7 @@ class FansWindow(FramelessWindow):
         self.fw_note = label("", 12.5, 400, theme.TEXT_TILE, rich=True)
         self.fw_note.setWordWrap(True)
         nl.addWidget(self.fw_note, 1)
-        self.btn_goto_custom = make_button("Özel’e geç", "secondary", height=32, pad=12)
+        self.btn_goto_custom = make_button(tr("Özel’e geç"), "secondary", height=32, pad=12)
         self.btn_goto_custom.clicked.connect(lambda: self._select_profile("custom"))
         nl.addWidget(self.btn_goto_custom)
         self.limit_stack.addWidget(page_note)
@@ -228,7 +229,7 @@ class FansWindow(FramelessWindow):
         np_.lay.setSpacing(10)
         np_.lay.addWidget(section_title("NVIDIA"))
         self.nv_boost = ValueSlider("Dynamic Boost", "5 – 25 W", 5, 25, 1, " W")
-        self.nv_temp = ValueSlider("Sıcaklık hedefi", "75 – 87 °C", 75, 87, 1, " °C")
+        self.nv_temp = ValueSlider(tr("Sıcaklık hedefi"), "75 – 87 °C", 75, 87, 1, " °C")
         self.nv_boost.committed.connect(lambda v: self.ctl.set_nv_boost(int(v)))
         self.nv_temp.committed.connect(lambda v: self.ctl.set_nv_temp_target(int(v)))
         np_.lay.addWidget(self.nv_boost)
@@ -240,12 +241,12 @@ class FansWindow(FramelessWindow):
         ep.lay.setContentsMargins(12, 12, 12, 12)
         ep.lay.setSpacing(10)
         eh = QHBoxLayout()
-        eh.addWidget(section_title("Enerji tercihi (EPP)"))
+        eh.addWidget(section_title(tr("Enerji tercihi (EPP)")))
         eh.addStretch(1)
         self.epp_for = label("", 11.5, 400, theme.TEXT3)
         eh.addWidget(self.epp_for)
         ep.lay.addLayout(eh)
-        self.epp_seg = Segmented([(k, t) for k, t, _ in EPP_KEYS], height=28, font_px=12.5, pad=10, stretch=True)
+        self.epp_seg = Segmented([(k, tr(t)) for k, t, _ in EPP_KEYS], height=28, font_px=12.5, pad=10, stretch=True)
         self.epp_seg.changed.connect(self._epp_changed)
         ep.lay.addWidget(self.epp_seg)
         lay.addWidget(ep)
@@ -257,8 +258,8 @@ class FansWindow(FramelessWindow):
         self.chip_ac, self.chip_bat = ChipButton(), ChipButton()
         self.chip_ac.clicked.connect(lambda: self._cycle("ac"))
         self.chip_bat.clicked.connect(lambda: self._cycle("bat"))
-        for i, (icon, text, chip) in enumerate((("plug", "Prize takılınca", self.chip_ac),
-                                                ("battery", "Pilde", self.chip_bat))):
+        for i, (icon, text, chip) in enumerate((("plug", tr("Prize takılınca"), self.chip_ac),
+                                                ("battery", tr("Pilde"), self.chip_bat))):
             r = QHBoxLayout()
             r.setContentsMargins(0, 0, 0, 0)
             r.setSpacing(10)
@@ -368,8 +369,8 @@ class FansWindow(FramelessWindow):
 
     def _update_note(self) -> None:
         n = len(self.chart.points())
-        self.note.setText(f"Nokta {self.chart.selected_index() + 1}/{n} seçili · sürükle veya ok tuşlarıyla ayarla"
-                          if n else "Eğri okunuyor…")
+        self.note.setText(tr("Nokta {i}/{n} seçili · sürükle veya ok tuşlarıyla ayarla",
+                             i=self.chart.selected_index() + 1, n=n) if n else tr("Eğri okunuyor…"))
 
     def _apply_curve(self) -> None:
         pts = self.chart.points()
@@ -403,7 +404,7 @@ class FansWindow(FramelessWindow):
             self.limit_stack.widget(i).setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred if i == self.limit_stack.currentIndex()
                 else QSizePolicy.Policy.Ignored)
-        self.limit_badge.setText("Özel" if is_custom else "Firmware")
+        self.limit_badge.setText(tr("Özel") if is_custom else tr("Firmware"))
         self.limit_badge.setStyleSheet(
             (f"background:{self._accent}; color:{theme.INK};" if is_custom else f"background:{theme.BORDER}; color:{theme.TEXT_TILE};")
             + " border-radius:11px; padding:0 9px; font-size:11.5px; font-weight:600;")
@@ -411,12 +412,13 @@ class FansWindow(FramelessWindow):
             s.setEnabled(is_custom and not self.is_busy("perf"))
         self._sync_limit_sliders()
         active = self.state.perf_mode == "custom"
-        self.custom_hint.setText("Değerler bırakınca uygulanır." if active else
-                                 "Özel mod etkin değil: değerler kaydedilir, Özel seçilince uygulanır.")
+        self.custom_hint.setText(tr("Değerler bırakınca uygulanır.") if active else
+                                 tr("Özel mod etkin değil: değerler kaydedilir, Özel seçilince uygulanır."))
         self.btn_enable_custom.setVisible(not active)
-        self.fw_note.setText(f'{PERF_LABEL[self.edit_mode]} modunda limitleri firmware yönetir. Kendi limitlerin için '
-                             f'<b style="font-weight:600; color:{theme.TEXT}">Özel</b> profili seç.')
-        self.epp_for.setText(f"{PERF_LABEL[self.edit_mode]} profili için")
+        self.fw_note.setText(tr("{mode} modunda limitleri firmware yönetir. Kendi limitlerin için {custom} profili seç.",
+                                mode=PERF_LABEL[self.edit_mode],
+                                custom=f'<b style="font-weight:600; color:{theme.TEXT}">{PERF_LABEL["custom"]}</b>'))
+        self.epp_for.setText(tr("{mode} profili için", mode=PERF_LABEL[self.edit_mode]))
         self._refresh_epp()
 
     def _sync_limit_sliders(self) -> None:

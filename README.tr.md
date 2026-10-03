@@ -9,20 +9,20 @@ ASUS ROG dizüstü bilgisayarlar için Linux'ta çalışan, [G-Helper](https://g
 
 > **Durum: erken aşamada, yalnızca tek makinede test edildi.** Core Ultra 9 285H ve RTX 5070 Laptop'lu bir ASUS ROG Zephyrus (2025) üzerinde, Zorin OS 18 (GNOME, Wayland) ile geliştirildi ve doğrulandı. Diğer modellerde davranış farklı olabilir. Bkz. [Güvenlik ve sınırlamalar](#8-güvenlik-ve-sınırlamalar).
 >
-> **Arayüz Türkçedir.** Modlar Sessiz / Dengeli / Turbo / Özel olarak adlandırılır. Çeviri (i18n) katkıları çok memnuniyetle karşılanır.
+> **Arayüz İngilizce ve Türkçe olarak sunulur.** Dil sistem yerel ayarına göre seçilir (`tr` ile başlıyorsa Türkçe, aksi halde İngilizce); Ayarlar → Dil bölümünden değiştirilebilir (yeniden başlatınca uygulanır). Yeni çeviriler memnuniyetle karşılanır: bkz. `rog_control/i18n.py` ve `rog_control/i18n_en.py`.
 
 <p align="center">
-  <img src="docs/screenshots/main-balanced.png" width="300" alt="Ana pencere, Dengeli mod">
-  <img src="docs/screenshots/main-turbo.png" width="300" alt="Ana pencere, Turbo mod">
+  <img src="docs/screenshots/tr/main-balanced.png" width="300" alt="Ana pencere, Dengeli mod">
+  <img src="docs/screenshots/tr/main-turbo.png" width="300" alt="Ana pencere, Turbo mod">
 </p>
 
 ## 1. Ekran görüntüleri
 
 | | |
 |---|---|
-| ![Eco bekliyor](docs/screenshots/main-eco-pending.png) Eco seçili, bir sonraki açılışta uygulanır | ![Fanlar ve güç](docs/screenshots/fans-power.png) Fan eğrisi editörü, güç limitleri, NVIDIA, EPP |
-| ![Mini pencere](docs/screenshots/mini.png) Mini pencere | ![Tepsi menüsü](docs/screenshots/tray-menu.png) Tepsi menüsü |
-| ![Klavye](docs/screenshots/keyboard.png) Klavye parlaklığı ve rengi | ![Ayarlar](docs/screenshots/settings.png) Ayarlar |
+| ![Eco bekliyor](docs/screenshots/tr/main-eco-pending.png) Eco seçili, bir sonraki açılışta uygulanır | ![Fanlar ve güç](docs/screenshots/tr/fans-power.png) Fan eğrisi editörü, güç limitleri, NVIDIA, EPP |
+| ![Mini pencere](docs/screenshots/tr/mini.png) Mini pencere | ![Tepsi menüsü](docs/screenshots/tr/tray-menu.png) Tepsi menüsü |
+| ![Klavye](docs/screenshots/tr/keyboard.png) Klavye parlaklığı ve rengi | ![Ayarlar](docs/screenshots/tr/settings.png) Ayarlar |
 
 Ekran görüntüleri sahte verilerle üretilmiştir (`tools/screenshot_windows.py`); model adı ve sensör değerleri örnektir.
 
@@ -173,14 +173,14 @@ Rehberde ayrıca **yapılmaması** gerekenler de var: canlı `supergfxctl -m`, N
 - **Ultimate (MUX) ve Optimize GPU modları henüz desteklenmiyor.**
 - Referans makinede boşta tüketim pilde yaklaşık 15–16 W (ölçüldü; RAPL `psys` değeri 1–2 W daha yüksek gösteriyor). `pcie_aspm=off` muhtemelen bunun bir kısmına mal oluyor ama bu modelde gerekli (yukarıya bakın).
 - Referans makinede `nvidia-powerd` kurulu değildi ve Dynamic Boost ona bağlı; oradaki kaydırıcının etkisi incelenmedi.
-- Arayüz yalnızca Türkçedir.
+- Arayüz yalnızca İngilizce ve Türkçedir (Ayarlar → Dil; diğer diller katkı olarak memnuniyetle karşılanır).
 
 ## 9. Geliştirme
 
 ```bash
 python3 -m venv .venv --system-site-packages   # ya da PyQt6 ve psutil'i kendi venv'ine kur
 QT_QPA_PLATFORM=offscreen python3 -m pytest tests
-QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots   # pencereleri sahte durumla çiz
+QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots/tr --lang tr   # pencereleri sahte durumla çiz
 ```
 
 Test takımında 262 test var (backend'ler, core controller ve state, widget'lar, pencereler, root yardımcı) ve ekransız çalışır. **Testler gerçek sisteme asla yazmaz**; yazma yolları mock, sahte nesneler ve yeniden köklendirilmiş yardımcıyla (`ROG_CONTROL_HELPER_TESTROOT`, yalnızca root değilken geçerli) sınanır.

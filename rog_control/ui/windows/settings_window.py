@@ -8,10 +8,12 @@ import shutil
 from pathlib import Path
 
 from PyQt6.QtCore import QProcess, QSettings, Qt
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from rog_control import i18n
+from rog_control.i18n import tr
 from rog_control.ui import theme
-from rog_control.ui.widgets import ToggleSwitch
+from rog_control.ui.widgets import Segmented, ToggleSwitch
 from rog_control.ui.windows._base import FramelessWindow, Panel, hline, label
 
 log = logging.getLogger(__name__)
@@ -100,14 +102,14 @@ class SettingsWindow(FramelessWindow):
     def __init__(self, state, controller, settings: QSettings, autostart_path: Path | None = None,
                  project_root: Path = PROJECT_ROOT, parent: QWidget | None = None,
                  unit_path: Path | None = None, systemctl_runner=None):
-        super().__init__(state, controller, "ROG Control — Ayarlar", 480, 400, back=True, parent=parent)
+        super().__init__(state, controller, tr("ROG Control — Ayarlar"), 480, 470, back=True, parent=parent)
         self.settings = settings
         self.autostart_path = Path(autostart_path) if autostart_path else DEFAULT_AUTOSTART
         self.project_root = project_root
         self.unit_path = Path(unit_path) if unit_path else DEFAULT_UNIT
         self._systemctl = systemctl_runner or run_systemctl
         tb = self.titlebar.lay
-        tb.addWidget(self.title_label("Ayarlar"))
+        tb.addWidget(self.title_label(tr("Ayarlar")))
         tb.addStretch(1)
         self.add_window_buttons(minimize=False)
 
@@ -117,16 +119,33 @@ class SettingsWindow(FramelessWindow):
         p = Panel(14)
         p.lay.setContentsMargins(14, 6, 14, 6)
         p.lay.setSpacing(6)
-        self.sw_autostart = ToggleSwitch("Oturum açılışında başlat", "Giriş yapınca tepside küçültülmüş açılır")
-        self.sw_tray = ToggleSwitch("Kapatınca tepsiye küçült", "Pencereyi kapatmak uygulamayı çalışır halde bırakır")
-        self.sw_notify = ToggleSwitch("Profil değişince bildirim göster", "Fn tuşu gibi dış değişikliklerde")
-        self.sw_watts = ToggleSwitch("Tepside watt göster", "Tepsi simgesinde toplam güç (W) yazar")
+        self.sw_autostart = ToggleSwitch(tr("Oturum açılışında başlat"), tr("Giriş yapınca tepside küçültülmüş açılır"))
+        self.sw_tray = ToggleSwitch(tr("Kapatınca tepsiye küçült"), tr("Pencereyi kapatmak uygulamayı çalışır halde bırakır"))
+        self.sw_notify = ToggleSwitch(tr("Profil değişince bildirim göster"), tr("Fn tuşu gibi dış değişikliklerde"))
+        self.sw_watts = ToggleSwitch(tr("Tepside watt göster"), tr("Tepsi simgesinde toplam güç (W) yazar"))
         for i, sw in enumerate((self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts)):
             sw.setMinimumHeight(48)
             p.lay.addWidget(sw)
             if i < 3:
                 p.lay.addWidget(hline())
+        p.lay.addWidget(hline())
+        lang_row = QHBoxLayout()
+        lang_row.setContentsMargins(0, 0, 0, 0)
+        lang_row.setSpacing(10)
+        lang_row.addWidget(label("Dil / Language", 13, 500), 1)
+        self.lang_seg = Segmented([("auto", tr("Otomatik")), ("en", "English"), ("tr", "Türkçe")], 30, 12.5, 12)
+        pref = str(settings.value(i18n.KEY_LANGUAGE, "auto") or "auto")
+        self.lang_seg.set_current(pref if pref in i18n.LANGUAGES else "auto")
+        self.lang_seg.changed.connect(self._language_changed)
+        lang_row.addWidget(self.lang_seg)
+        lang_w = QWidget()
+        lang_w.setMinimumHeight(48)
+        lang_w.setLayout(lang_row)
+        p.lay.addWidget(lang_w)
         lay.addWidget(p)
+        self.lang_note = label("", 11.5, 400, theme.TEXT2)
+        self.lang_note.setWordWrap(True)
+        lay.addWidget(self.lang_note)
         self.psys_info = label("", 11.5, 400, theme.TEXT2)
         self.psys_info.setWordWrap(True)
         self.psys_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -135,7 +154,7 @@ class SettingsWindow(FramelessWindow):
         self.note.setWordWrap(True)
         lay.addWidget(self.note)
         lay.addStretch(1)
-        self.track_accent(self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts)
+        self.track_accent(self.sw_autostart, self.sw_tray, self.sw_notify, self.sw_watts, self.lang_seg)
 
         self._init_autostart_state()
         self.sw_tray.setChecked(settings.value(KEY_TRAY, True, type=bool))
@@ -151,12 +170,23 @@ class SettingsWindow(FramelessWindow):
     def _refresh_psys(self, snap) -> None:
         avail = getattr(snap, "psys_available", None)
         if avail is True:
-            self.psys_info.setText("Toplam güç: RAPL psys")
+            self.psys_info.setText(tr("Toplam güç: RAPL psys"))
         elif avail is False:
-            self.psys_info.setText("Toplam güç ölçümü için izin gerekli. Terminalde çalıştırın:\n"
+            self.psys_info.setText(tr("Toplam güç ölçümü için izin gerekli. Terminalde çalıştırın:") + "\n"
                                    + install_command(self.project_root))
         else:
             self.psys_info.setText("")
+
+    def _language_changed(self, key: str) -> None:
+        """Stored now, applied at the next start (no live re-translation)."""
+        self.settings.setValue(i18n.KEY_LANGUAGE, key)
+        self.settings.sync()
+        effective = i18n.resolve(key)
+        if effective == i18n.current_language() and key == i18n.language_preference():
+            self.lang_note.setText("")
+        else:
+            # shown in both languages: the user may be switching away from one they cannot read
+            self.lang_note.setText("Değişiklik yeniden başlatınca uygulanır / Applies after restart")
 
     def _save(self, key: str, on: bool) -> None:
         self.settings.setValue(key, bool(on))
@@ -186,14 +216,14 @@ class SettingsWindow(FramelessWindow):
         except OSError as e:
             log.error("autostart write failed: %s", e)
             self.sw_autostart.setChecked(autostart_enabled(self.autostart_path))
-            self.note.setText(f"Otomatik başlatma ayarlanamadı: {e}")
+            self.note.setText(tr("Otomatik başlatma ayarlanamadı: {err}", err=e))
 
     def _autostart_systemd(self, on: bool) -> None:
         def done(code: int, _out: str) -> None:
             if code != 0:
                 log.error("systemctl --user %s failed (exit %s)", "enable" if on else "disable", code)
                 self.sw_autostart.setChecked(not on)
-                self.note.setText("Otomatik başlatma ayarlanamadı (systemctl --user başarısız).")
+                self.note.setText(tr("Otomatik başlatma ayarlanamadı (systemctl --user başarısız)."))
                 return
             self.note.setText("")
             if on:

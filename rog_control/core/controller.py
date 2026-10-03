@@ -11,6 +11,7 @@ from PyQt6.QtDBus import QDBusConnection
 from ..backend import dbus_util
 from ..backend.dbus_util import Typed
 from ..backend.types import Epp, FanCurve, GfxMode, GfxPower, Profile
+from ..i18n import tr
 from .state import AppState, AuraView, DisplayView, GfxView
 
 log = logging.getLogger(__name__)
@@ -168,7 +169,7 @@ class Controller(QObject):
             fn()
         except Exception:
             log.exception("write %s failed", key)
-            self.state.emit_message("error", f"İşlem başarısız oldu ({key}).")
+            self.state.emit_message("error", tr("İşlem başarısız oldu ({key}).", key=key))
         finally:
             QTimer.singleShot(0, lambda: self.state.emit_busy(key, False))
 
@@ -178,10 +179,10 @@ class Controller(QObject):
             log.warning("policy write failed; clearing custom flag")
             self._set_custom_flag(False)
             self._derive_mode()
-        self.state.emit_message("error", f"asusd işlemi başarısız ({op}): {msg}")
+        self.state.emit_message("error", tr("asusd işlemi başarısız ({op}): {msg}", op=op, msg=msg))
 
     def _on_display_error(self, msg: str) -> None:
-        self.state.emit_message("error", f"Yenileme hızı değiştirilemedi: {msg}")
+        self.state.emit_message("error", tr("Yenileme hızı değiştirilemedi: {msg}", msg=msg))
         self._end_refresh_busy()
 
     # ------------------------------------------------------------ platform
@@ -253,7 +254,7 @@ class Controller(QObject):
 
     def set_perf_mode(self, mode: str) -> None:
         if mode not in _MODE_TO_PROFILE:
-            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            self.state.emit_message("error", tr("Bilinmeyen mod: {mode}", mode=mode))
             return
         custom = mode == "custom"
         target = _MODE_TO_PROFILE[mode]
@@ -324,15 +325,15 @@ class Controller(QObject):
 
     def request_gpu_mode(self, mode: str) -> None:
         if mode not in _VIEW_TO_GFX:
-            self.state.emit_message("warn", "Bu GPU modu henüz desteklenmiyor.")
+            self.state.emit_message("warn", tr("Bu GPU modu henüz desteklenmiyor."))
             return
         self._request_boot(_VIEW_TO_GFX[mode], mode, cancel=False)
 
     def cancel_gpu_pending(self) -> None:
         active = self.state.gfx.active
         if active not in _VIEW_TO_GFX:
-            self.state.emit_message("warn", "Bekleyen değişiklik iptal edilemedi: "
-                                    "etkin GPU modu bilinmiyor veya desteklenmiyor.")
+            self.state.emit_message("warn", tr("Bekleyen değişiklik iptal edilemedi: "
+                                       "etkin GPU modu bilinmiyor veya desteklenmiyor."))
             return
         self._request_boot(_VIEW_TO_GFX[active], active, cancel=True)
 
@@ -345,43 +346,43 @@ class Controller(QObject):
             self._rebuild_gfx()
             if ok:
                 if cancel:
-                    self.state.emit_message("info", "Bekleyen GPU değişikliği iptal edildi.")
+                    self.state.emit_message("info", tr("Bekleyen GPU değişikliği iptal edildi."))
                 elif leaving_eco:
                     self.state.emit_message(
-                        "info", "dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı ŞİMDİ "
-                        "yeniden başlatman gerekiyor.")
+                        "info", tr("dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı ŞİMDİ "
+                                   "yeniden başlatman gerekiyor."))
                     self.gpuRebootRequired.emit()
                 else:
                     label = {"eco": "Eco", "standard": "Standart"}[name]
-                    self.state.emit_message("info", f"{label} yeniden başlatınca etkin olacak.")
+                    self.state.emit_message("info", tr("{name} yeniden başlatınca etkin olacak.", name=tr(label)))
                 return
             code = getattr(self.gfx, "last_exit_code", None)
             if code is None:
                 code = _helper_exit_code(msg)
             if code == 126:
-                self.state.emit_message("info", "Yetkilendirme iptal edildi; hiçbir şey değiştirilmedi.")
+                self.state.emit_message("info", tr("Yetkilendirme iptal edildi; hiçbir şey değiştirilmedi."))
             elif code == 127:
                 self.state.emit_message(
                     "error",
-                    "GPU yardımcısı çalıştırılamadı: yetki verilmedi ya da kurulu değil "
-                    "(kurulum: sudo helper/install.sh).")
+                    tr("GPU yardımcısı çalıştırılamadı: yetki verilmedi ya da kurulu değil "
+                       "(kurulum: sudo helper/install.sh)."))
             elif code == 7:
                 self.state.emit_message(
                     "error",
-                    "supergfxd durdurulamadı; Eco'dan çıkış başlatılmadı ve yapılandırma geri alındı. "
-                    "Hiçbir şey değişmedi.")
+                    tr("supergfxd durdurulamadı; Eco'dan çıkış başlatılmadı ve yapılandırma geri alındı. "
+                       "Hiçbir şey değişmedi."))
             elif code == 8:
                 self.state.emit_message(
                     "error",
-                    "Eco'dan çıkış tamamlanamadı: dGPU açılamadı. Yapılandırma Standart olarak kaldı; "
-                    "yeniden başlatırsan bilgisayar güvenle Eco'da açılır.")
+                    tr("Eco'dan çıkış tamamlanamadı: dGPU açılamadı. Yapılandırma Standart olarak kaldı; "
+                       "yeniden başlatırsan bilgisayar güvenle Eco'da açılır."))
             elif code == 4:
                 self.state.emit_message(
                     "warn",
-                    "Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz. "
-                    "Önce Ultimate modundan çıkılmalı.")
+                    tr("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz. "
+                       "Önce Ultimate modundan çıkılmalı."))
             else:
-                self.state.emit_message("error", f"GPU modu değiştirilemedi: {msg}")
+                self.state.emit_message("error", tr("GPU modu değiştirilemedi: {msg}", msg=msg))
 
         try:
             self.gfx.request_boot_mode(gfx_mode, done)
@@ -396,7 +397,7 @@ class Controller(QObject):
         def done(_result, err) -> None:
             self.state.emit_busy("reboot", False)
             if err:
-                self.state.emit_message("error", f"Yeniden başlatılamadı: {err}")
+                self.state.emit_message("error", tr("Yeniden başlatılamadı: {err}", err=err))
 
         self._dbus_call(
             QDBusConnection.systemBus(), "org.freedesktop.login1", "/org/freedesktop/login1",
@@ -498,12 +499,12 @@ class Controller(QObject):
     def set_epp(self, mode: str, epp: int) -> None:
         prop = _EPP_PROP.get(mode)
         if prop is None:
-            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            self.state.emit_message("error", tr("Bilinmeyen mod: {mode}", mode=mode))
             return
         try:
             value = int(Epp(int(epp)))
         except ValueError:
-            self.state.emit_message("error", f"Geçersiz EPP değeri: {epp}")
+            self.state.emit_message("error", tr("Geçersiz EPP değeri: {epp}", epp=epp))
             return
         self._pulse("epp", lambda: self.asusd.set_platform(prop, value))
 
@@ -517,7 +518,7 @@ class Controller(QObject):
         try:
             ac, bat = _MODE_TO_PROFILE[on_ac], _MODE_TO_PROFILE[on_battery]
         except KeyError:
-            self.state.emit_message("error", "Geçersiz otomatik profil seçimi.")
+            self.state.emit_message("error", tr("Geçersiz otomatik profil seçimi."))
             return
 
         def write() -> None:
@@ -532,7 +533,7 @@ class Controller(QObject):
     def load_fan_curves(self, mode: str) -> None:
         profile = _MODE_TO_PROFILE.get(mode)
         if profile is None:
-            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            self.state.emit_message("error", tr("Bilinmeyen mod: {mode}", mode=mode))
             return
         self.state.emit_busy("fan_load", True)
 
@@ -541,7 +542,7 @@ class Controller(QObject):
             if curves:
                 self._store_curves(mode, list(curves))
             else:
-                self.state.emit_message("error", "Fan eğrileri okunamadı.")
+                self.state.emit_message("error", tr("Fan eğrileri okunamadı."))
 
         self.asusd.fetch_fan_curves(profile, done)
 
@@ -553,22 +554,22 @@ class Controller(QObject):
     def apply_fan_curve(self, mode: str, fan: str, points: list[tuple[int, int]]) -> None:
         profile = _MODE_TO_PROFILE.get(mode)
         if profile is None:
-            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            self.state.emit_message("error", tr("Bilinmeyen mod: {mode}", mode=mode))
             return
         if len(points) != 8:
-            self.state.emit_message("error", "Fan eğrisi tam olarak 8 nokta içermelidir.")
+            self.state.emit_message("error", tr("Fan eğrisi tam olarak 8 nokta içermelidir."))
             return
         try:
             temps = [int(t) for t, _ in points]
             pcts = [int(p) for _, p in points]
         except (TypeError, ValueError):
-            self.state.emit_message("error", "Fan eğrisi noktaları geçersiz.")
+            self.state.emit_message("error", tr("Fan eğrisi noktaları geçersiz."))
             return
         if any(b <= a for a, b in zip(temps, temps[1:])):
-            self.state.emit_message("error", "Fan eğrisinde sıcaklıklar artan sırada olmalıdır.")
+            self.state.emit_message("error", tr("Fan eğrisinde sıcaklıklar artan sırada olmalıdır."))
             return
         if not all(0 <= t <= 255 for t in temps) or not all(0 <= p <= 100 for p in pcts):
-            self.state.emit_message("error", "Fan eğrisi değerleri aralık dışında.")
+            self.state.emit_message("error", tr("Fan eğrisi değerleri aralık dışında."))
             return
         fan_u = fan.upper()
         cached = self.state.fan_curves.get(mode)
@@ -590,7 +591,7 @@ class Controller(QObject):
     def reset_fan_curves(self, mode: str) -> None:
         profile = _MODE_TO_PROFILE.get(mode)
         if profile is None:
-            self.state.emit_message("error", f"Bilinmeyen mod: {mode}")
+            self.state.emit_message("error", tr("Bilinmeyen mod: {mode}", mode=mode))
             return
         self._pulse("fan", lambda: self.asusd.reset_fan_curves(profile))
         QTimer.singleShot(500, lambda: self.load_fan_curves(mode))

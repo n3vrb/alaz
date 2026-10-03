@@ -6,12 +6,13 @@ import logging
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets import make_button
 
 log = logging.getLogger(__name__)
 
-GPU_NAMES = {"eco": "Eco", "standard": "Standart"}
+GPU_NAMES = {"eco": "Eco", "standard": "Standart"}   # Turkish source texts; translated via tr() on use
 ECO_EXIT_TEXT = ("dGPU şimdi yeniden etkinleştirilecek ve bilgisayarı hemen ardından yeniden başlatman "
                  "GEREKİYOR. Yeniden başlatana kadar yeni bir USB/Thunderbolt aygıtı takma. "
                  "Açık işlerini kaydetmeye hazır mısın?")
@@ -48,34 +49,35 @@ class ConfirmDialog(QDialog):
         lay.addLayout(row)
 
 
-def ask(parent: QWidget | None, title: str, text: str, ok_text: str = "Tamam", cancel_text: str = "Vazgeç",
+def ask(parent: QWidget | None, title: str, text: str, ok_text: str = "", cancel_text: str = "",
         accent: str = theme.DEFAULT_ACCENT) -> bool:
-    dlg = ConfirmDialog(parent, title, text, ok_text, cancel_text, accent)
+    """Shows the dialog. Callers pass already translated texts (the defaults are translated here)."""
+    dlg = ConfirmDialog(parent, title, text, ok_text or tr("Tamam"), cancel_text or tr("Vazgeç"), accent)
     return dlg.exec() == QDialog.DialogCode.Accepted
 
 
 def confirm_gpu_change(parent: QWidget | None, mode: str, accent: str = theme.DEFAULT_ACCENT,
                        leaving_eco: bool = False) -> bool:
-    name = GPU_NAMES.get(mode, mode)
+    name = tr(GPU_NAMES.get(mode, mode))
     if leaving_eco:
-        return ask(parent, "Eco modundan çık", ECO_EXIT_TEXT, "Devam", "Vazgeç", accent)
-    return ask(parent, f"GPU modu: {name}",
-               f"{name} moduna geçiş yeniden başlatınca uygulanır; şu an hiçbir şey değişmez. "
-               "İstediğin zaman yeniden başlatmadan önce iptal edebilirsin.",
-               "Devam", "Vazgeç", accent)
+        return ask(parent, tr("Eco modundan çık"), tr(ECO_EXIT_TEXT), tr("Devam"), tr("Vazgeç"), accent)
+    return ask(parent, tr("GPU modu: {name}", name=name),
+               tr("{name} moduna geçiş yeniden başlatınca uygulanır; şu an hiçbir şey değişmez. "
+                  "İstediğin zaman yeniden başlatmadan önce iptal edebilirsin.", name=name),
+               tr("Devam"), tr("Vazgeç"), accent)
 
 
 def confirm_reboot(parent: QWidget | None, accent: str = theme.DEFAULT_ACCENT) -> bool:
-    return ask(parent, "Yeniden başlat",
-               "Bilgisayar şimdi yeniden başlatılacak. Açık işlerini kaydettiğinden emin ol.",
-               "Yeniden başlat", "Vazgeç", accent)
+    return ask(parent, tr("Yeniden başlat"),
+               tr("Bilgisayar şimdi yeniden başlatılacak. Açık işlerini kaydettiğinden emin ol."),
+               tr("Yeniden başlat"), tr("Vazgeç"), accent)
 
 
 def confirm_reboot_after_eco_exit(parent: QWidget | None, accent: str = theme.DEFAULT_ACCENT) -> bool:
-    return ask(parent, "Yeniden başlatma gerekli",
-               "dGPU yeniden etkinleştirildi. Standart modun çalışması için bilgisayarı şimdi yeniden "
-               "başlatman gerekiyor. Açık işlerini kaydettiğinden emin ol.",
-               "Yeniden başlat", "Sonra", accent)
+    return ask(parent, tr("Yeniden başlatma gerekli"),
+               tr("dGPU yeniden etkinleştirildi. Standart modun çalışması için bilgisayarı şimdi yeniden "
+                  "başlatman gerekiyor. Açık işlerini kaydettiğinden emin ol."),
+               tr("Yeniden başlat"), tr("Sonra"), accent)
 
 
 def request_gpu_mode(parent: QWidget | None, controller, mode: str, accent: str = theme.DEFAULT_ACCENT,

@@ -9,6 +9,7 @@ from PyQt6.QtCore import QObject, QSettings, QTimer, pyqtSignal
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication
 
+from rog_control import i18n
 from rog_control.ui import theme
 
 log = logging.getLogger("rog_control")
@@ -228,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     guard.listen()
 
     settings = QSettings("rog-control", "rog-control")
+    log.debug("UI language: %s", i18n.init_from_settings(settings))   # must precede any window
     built = _build_fake() if args.fake else _build_real(settings)
     if built is None:
         return 1

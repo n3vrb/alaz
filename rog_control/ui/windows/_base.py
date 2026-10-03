@@ -12,19 +12,21 @@ from PyQt6.QtCore import QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (QAbstractButton, QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 
+from rog_control.i18n import TrMap, tr
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import IconButton
 from rog_control.ui.widgets.icons import draw_icon
 
 log = logging.getLogger(__name__)
 
-# ---- perf-mode vocabulary (PerfMode str <-> Turkish label) ---------------------------------------------------------
+# ---- perf-mode vocabulary (PerfMode str <-> label; the Turkish source text is translated on access) ----------------
 PERF_KEYS = ("quiet", "balanced", "turbo", "custom")
-PERF_LABEL = {"quiet": "Sessiz", "balanced": "Dengeli", "turbo": "Turbo", "custom": "Özel"}
-PERF_COLOR = {k: theme.MODE_COLORS[v] for k, v in PERF_LABEL.items()}
+_PERF_SRC = {"quiet": "Sessiz", "balanced": "Dengeli", "turbo": "Turbo", "custom": "Özel"}
+PERF_LABEL = TrMap(_PERF_SRC)
+PERF_COLOR = {k: theme.MODE_COLORS[v] for k, v in _PERF_SRC.items()}
 # asusd ThrottleThermalPolicy int (backend.types.Profile) -> PerfMode
 POLICY_KEY = {0: "balanced", 1: "turbo", 2: "quiet"}
-GPU_LABEL = {"eco": "Eco", "standard": "Standart", "ultimate": "Ultimate", "optimize": "Optimize"}
+GPU_LABEL = TrMap({"eco": "Eco", "standard": "Standart", "ultimate": "Ultimate", "optimize": "Optimize"})
 
 # Busy keys the controller is expected to emit via AppState.busyChanged(key, bool):
 #   "perf" perf-mode tiles + custom power limits   "gpu" GPU tiles / pending card   "refresh" refresh-rate segmented
@@ -408,7 +410,7 @@ class FramelessWindow(QWidget):
         if back:
             self.titlebar.lay.setContentsMargins(8, 0, 8, 0)
             self.titlebar.lay.setSpacing(8)
-            self.back_btn = IconButton("back", (34, 32), 16, theme.TEXT, 2.2, "Ana pencereye dön")
+            self.back_btn = IconButton("back", (34, 32), 16, theme.TEXT, 2.2, tr("Ana pencereye dön"))
             self.back_btn.clicked.connect(self._back)
             self.titlebar.lay.addWidget(self.back_btn)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -426,10 +428,10 @@ class FramelessWindow(QWidget):
     # ---- title bar helpers
     def add_window_buttons(self, minimize: bool = True) -> None:
         if minimize:
-            b = IconButton("minimize", (34, 32), 14, theme.TEXT2, 2.0, "Küçült")
+            b = IconButton("minimize", (34, 32), 14, theme.TEXT2, 2.0, tr("Küçült"))
             b.clicked.connect(self.showMinimized)
             self.titlebar.lay.addWidget(b)
-        c = IconButton("close", (34, 32), 14, theme.TEXT2, 2.0, "Kapat")
+        c = IconButton("close", (34, 32), 14, theme.TEXT2, 2.0, tr("Kapat"))
         c.clicked.connect(self.close)
         self.titlebar.lay.addWidget(c)
         self.close_btn = c

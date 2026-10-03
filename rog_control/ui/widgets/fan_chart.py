@@ -5,6 +5,7 @@ from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets._common import AccentMixin
 
@@ -35,7 +36,7 @@ class FanCurveChart(QWidget, AccentMixin):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
-        self.setAccessibleName("Fan eğrisi")
+        self.setAccessibleName(tr("Fan eğrisi"))
 
     # ---- API ------------------------------------------------------------
     def set_points(self, points) -> None:
@@ -211,8 +212,8 @@ class FanCurveChart(QWidget, AccentMixin):
             p.drawText(QRectF(0, self._y(v) - 8, self.ML - 8, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(v))
         for t in (20, 40, 60, 80, 100):
             p.drawText(QRectF(self._x(t) - 20, r.bottom() + 6, 40, 14), Qt.AlignmentFlag.AlignCenter, str(t))
-        p.drawText(QRectF(r.right() - 120, self.height() - 16, 120, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "Sıcaklık °C")
-        p.drawText(QRectF(4, 0, 80, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Fan %")
+        p.drawText(QRectF(r.right() - 120, self.height() - 16, 120, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tr("Sıcaklık °C"))
+        p.drawText(QRectF(4, 0, 80, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, tr("Fan %"))
         # current temperature
         if self._cur_temp is not None:
             x = round(self._x(self._cur_temp)) + 0.5
@@ -222,7 +223,7 @@ class FanCurveChart(QWidget, AccentMixin):
             pen.setDashPattern([3, 4])
             p.setPen(pen)
             p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()))
-            txt = f"Şu an {self._cur_temp:.0f}°"
+            txt = tr("Şu an {t}°", t=f"{self._cur_temp:.0f}")
             f = theme.ui_font(11, 600)
             p.setFont(f)
             w = QFontMetrics(f).horizontalAdvance(txt) + 16

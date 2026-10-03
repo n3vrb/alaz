@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QMenu, QVBoxLayout, QWidget
 
+from rog_control.i18n import tr
 from rog_control.ui import theme
 from rog_control.ui.widgets import (Banner, ModeTileRow, PendingCard, SectionHeader, Segmented, SensorPanel,
                                     ToggleSwitch, ValueSlider, make_button, strong)
@@ -77,15 +78,16 @@ class MainWindow(FramelessWindow):
         self.sensor.set_cpu_model(cpu_model_short())
         lay.addWidget(self.sensor)
 
-        self.banner = Banner("Windows'tan kalan Eco ayarı",
-                             "dGPU firmware'de kapalı kalmış (dgpu_disable=1); bir sonraki GPU modu seçimi bunu düzeltir")
+        self.banner = Banner(tr("Windows'tan kalan Eco ayarı"),
+                             tr("dGPU firmware'de kapalı kalmış (dgpu_disable=1); bir sonraki GPU modu seçimi bunu düzeltir"),
+                             tr("Düzelt"))
         self.banner.set_action_visible(False)
         self.banner.closed.connect(self.banner.hide)
         self.banner.hide()
         lay.addWidget(self.banner)
 
         # PERFORMANS
-        self.perf_header = SectionHeader("gauge", "Performans", "")
+        self.perf_header = SectionHeader("gauge", tr("Performans"), "")
         self.perf_row = ModeTileRow([(k, PERF_LABEL[k], ic, PERF_COLOR[k]) for k, ic in
                                      zip(PERF_KEYS, ("moon", "gauge", "bolt", "sliders"))])
         self.perf_row.clicked.connect(lambda k: request_perf(self.ctl, k))
@@ -93,13 +95,13 @@ class MainWindow(FramelessWindow):
         lay.addLayout(self._section(self.perf_header, self.perf_row, self.perf_desc))
 
         # GPU MODU
-        self.gpu_header = SectionHeader("chip", "GPU modu", "")
-        self.gpu_row = ModeTileRow([("eco", "Eco", "leaf", PERF_COLOR_GPU["eco"]),
-                                    ("standard", "Standart", "layers", PERF_COLOR_GPU["standard"]),
-                                    ("ultimate", "Ultimate", "chip", PERF_COLOR_GPU["ultimate"]),
-                                    ("optimize", "Optimize", "refresh", PERF_COLOR_GPU["optimize"])])
-        self.gpu_row.set_enabled("ultimate", False, NOT_SUPPORTED)
-        self.gpu_row.set_enabled("optimize", False, NOT_SUPPORTED)
+        self.gpu_header = SectionHeader("chip", tr("GPU modu"), "")
+        self.gpu_row = ModeTileRow([("eco", GPU_LABEL["eco"], "leaf", PERF_COLOR_GPU["eco"]),
+                                    ("standard", GPU_LABEL["standard"], "layers", PERF_COLOR_GPU["standard"]),
+                                    ("ultimate", GPU_LABEL["ultimate"], "chip", PERF_COLOR_GPU["ultimate"]),
+                                    ("optimize", GPU_LABEL["optimize"], "refresh", PERF_COLOR_GPU["optimize"])])
+        self.gpu_row.set_enabled("ultimate", False, tr(NOT_SUPPORTED))
+        self.gpu_row.set_enabled("optimize", False, tr(NOT_SUPPORTED))
         self.gpu_row.clicked.connect(self._gpu_clicked)
         self.gpu_desc = label("", 12, 400, theme.TEXT2)
         self.pending = PendingCard()
@@ -111,21 +113,21 @@ class MainWindow(FramelessWindow):
         lay.addLayout(self._section(self.gpu_header, self.gpu_row, self.gpu_desc, self.pending))
 
         # EKRAN
-        self.disp_header = SectionHeader("monitor", "Ekran", "")
+        self.disp_header = SectionHeader("monitor", tr("Ekran"), "")
         panel = Panel(12)
         panel.lay.setContentsMargins(4, 4, 4, 4)
         panel.lay.setSpacing(0)
         row = QHBoxLayout()
         row.setContentsMargins(10, 4, 4, 4)
         row.setSpacing(8)
-        row.addWidget(label("Yenileme hızı", 13, 500), 1)
+        row.addWidget(label(tr("Yenileme hızı"), 13, 500), 1)
         self._hz_row = row
         self._hz_sig = None
-        self.hz_seg = Segmented([("auto", "Otomatik")], 30, 12.5, 12)
+        self.hz_seg = Segmented([("auto", tr("Otomatik"))], 30, 12.5, 12)
         self.hz_seg.changed.connect(self._hz_changed)
         self.hz_more = make_button("···", "ghost", height=30, pad=0)
         self.hz_more.setFixedSize(34, 30)
-        self.hz_more.setToolTip("Diğer yenileme hızları")
+        self.hz_more.setToolTip(tr("Diğer yenileme hızları"))
         self.hz_more.setStyleSheet(self.hz_more.styleSheet() + "QPushButton::menu-indicator { image: none; width: 0; }")
         self._hz_menu = QMenu(self)
         self.hz_more.setMenu(self._hz_menu)
@@ -137,7 +139,7 @@ class MainWindow(FramelessWindow):
         sep_wrap.setContentsMargins(10, 4, 10, 4)
         sep_wrap.addWidget(sep)
         panel.lay.addLayout(sep_wrap)
-        self.od = ToggleSwitch("Panel Overdrive", "Daha hızlı piksel tepkisi")
+        self.od = ToggleSwitch(tr("Panel Overdrive"), tr("Daha hızlı piksel tepkisi"))
         self.od.toggled.connect(lambda on: self.ctl.set_panel_od(bool(on)))
         od_wrap = QHBoxLayout()
         od_wrap.setContentsMargins(10, 0, 6, 0)
@@ -146,7 +148,7 @@ class MainWindow(FramelessWindow):
         lay.addLayout(self._section(self.disp_header, panel))
 
         # ŞARJ LİMİTİ
-        self.bat_header = SectionHeader("battery", "Şarj limiti", "")
+        self.bat_header = SectionHeader("battery", tr("Şarj limiti"), "")
         bp = Panel(12)
         row2 = QHBoxLayout()
         row2.setSpacing(12)
@@ -163,10 +165,10 @@ class MainWindow(FramelessWindow):
         nav = QHBoxLayout()
         nav.setSpacing(8)
         nav.setContentsMargins(0, 0, 0, 14)
-        self.btn_fans = NavButton("fan", "Fanlar & Güç")
-        self.btn_kbd = NavButton("keyboard", "Klavye")
-        self.btn_set = NavButton("settings", "Ayarlar")
-        self.btn_mini = NavButton("expand", "", "Mini moda geç")
+        self.btn_fans = NavButton("fan", tr("Fanlar & Güç"))
+        self.btn_kbd = NavButton("keyboard", tr("Klavye"))
+        self.btn_set = NavButton("settings", tr("Ayarlar"))
+        self.btn_mini = NavButton("expand", "", tr("Mini moda geç"))
         self.btn_fans.clicked.connect(self.openFans)
         self.btn_kbd.clicked.connect(self.openKeyboard)
         self.btn_set.clicked.connect(self.openSettings)
@@ -206,7 +208,7 @@ class MainWindow(FramelessWindow):
     def _refresh_perf(self) -> None:
         m = self.state.perf_mode
         self.perf_row.set_selected(m)
-        self.perf_desc.setText(PERF_DESC.get(m, ""))
+        self.perf_desc.setText(tr(PERF_DESC.get(m, "")))
         self.pill.set(PERF_LABEL.get(m, ""), self.state.accent)
 
     def _refresh_sensors(self, s) -> None:
@@ -236,7 +238,7 @@ class MainWindow(FramelessWindow):
 
     def _refresh_gfx(self) -> None:
         g = self.state.gfx
-        self.gpu_header.set_value(f"Etkin: {strong(GPU_LABEL.get(g.active, '—') if g.active else '—')}")
+        self.gpu_header.set_value(tr("Etkin: {name}", name=strong(GPU_LABEL.get(g.active, "—") if g.active else "—")))
         self.gpu_row.set_selected(g.active)
         self.gpu_row.set_pending(g.pending)
         show_banner = bool(g.dgpu_disabled and g.active == "eco" and g.boot != "eco")
@@ -245,12 +247,12 @@ class MainWindow(FramelessWindow):
             name = GPU_LABEL.get(g.pending, g.pending)
             urgent = self._reboot_required()
             if urgent:
-                self.pending.set_content("Yeniden başlatma gerekli",
-                                         "dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı "
-                                         "şimdi yeniden başlat.")
+                self.pending.set_content(tr("Yeniden başlatma gerekli"),
+                                         tr("dGPU yeniden etkinleştirildi. Standart mod için bilgisayarı "
+                                            "şimdi yeniden başlat."))
             else:
-                self.pending.set_content(f"{name} yeniden başlatınca etkin olacak",
-                                         GPU_REBOOT_SUB.get(g.pending, "Açık işlerini kaydet."))
+                self.pending.set_content(tr("{name} yeniden başlatınca etkin olacak", name=name),
+                                         tr(GPU_REBOOT_SUB.get(g.pending, "Açık işlerini kaydet.")))
             self.pending.set_urgent(urgent)
             self.pending.set_accent(self._pending_color())
             self.pending.set_color(self._pending_color())
@@ -258,9 +260,9 @@ class MainWindow(FramelessWindow):
             self.gpu_desc.hide()
         else:
             self.pending.hide()
-            desc = GPU_DESC.get(g.active or "", "")
+            desc = tr(GPU_DESC.get(g.active or "", ""))
             if g.active == "standard":
-                desc += " Şu an dGPU uykuda." if g.power == "sleep" else ""
+                desc += " " + tr("Şu an dGPU uykuda.") if g.power == "sleep" else ""
             self.gpu_desc.setText(desc)
             self.gpu_desc.show()
 
@@ -268,7 +270,7 @@ class MainWindow(FramelessWindow):
         d = self.state.display
         rates = sorted(set(d.rates or []))
         quick = [r for r in HZ_QUICK if r in rates] or rates[:3]
-        items = [(str(r), f"{r} Hz") for r in quick] + [("auto", "Otomatik")]
+        items = [(str(r), f"{r} Hz") for r in quick] + [("auto", tr("Otomatik"))]
         if self._hz_sig != tuple(items):
             self._hz_sig = tuple(items)
             old = self.hz_seg
@@ -290,8 +292,8 @@ class MainWindow(FramelessWindow):
         self.hz_more.setVisible(len(rates) > len(quick))
         cur = "auto" if d.auto else (str(d.current_hz) if d.current_hz else None)
         self.hz_seg.set_current(cur if cur in {k for k, _ in items} else None)
-        cur_txt = "—" if d.current_hz is None else f"{d.current_hz} Hz" + (" (otomatik)" if d.auto else "")
-        self.disp_header.set_value(f"Dahili panel · {strong(cur_txt)}")
+        cur_txt = "—" if d.current_hz is None else f"{d.current_hz} Hz" + (" " + tr("(otomatik)") if d.auto else "")
+        self.disp_header.set_value(tr("Dahili panel · {value}", value=strong(cur_txt)))
 
     def _refresh_battery(self) -> None:
         self._refresh_battery_limit()
@@ -308,8 +310,8 @@ class MainWindow(FramelessWindow):
         s = self.state.sensors
         txt = ""
         if s is not None and s.battery_pct is not None:
-            st = BAT_STATUS.get(s.battery_status or "", "")
-            txt = f"Pil {strong(f'{s.battery_pct:.0f} %')}" + (f" · {st}" if st else "")
+            st = tr(BAT_STATUS.get(s.battery_status or "", ""))
+            txt = tr("Pil {value}", value=strong(f"{s.battery_pct:.0f} %")) + (f" · {st}" if st else "")
         self.bat_header.set_value(txt)
 
     def _on_platform(self, name: str, _v) -> None:
@@ -324,7 +326,7 @@ class MainWindow(FramelessWindow):
         self.od.setEnabled(od is not None and not self.is_busy("panel_od"))
         ac, bat = POLICY_KEY.get(p.get("ThrottlePolicyOnAc")), POLICY_KEY.get(p.get("ThrottlePolicyOnBattery"))
         if ac and bat:
-            self.perf_header.set_value(f"Otomatik: prizde {strong(PERF_LABEL[ac])} · pilde {strong(PERF_LABEL[bat])}")
+            self.perf_header.set_value(tr("Otomatik: prizde {ac} · pilde {bat}", ac=strong(PERF_LABEL[ac]), bat=strong(PERF_LABEL[bat])))
         else:
             self.perf_header.set_value("")
 
@@ -347,8 +349,8 @@ class MainWindow(FramelessWindow):
         b = self.is_busy
         self.perf_row.setEnabled(not b("perf"))
         self.gpu_row.setEnabled(not b("gpu"))
-        self.gpu_row.set_enabled("ultimate", False, NOT_SUPPORTED)
-        self.gpu_row.set_enabled("optimize", False, NOT_SUPPORTED)
+        self.gpu_row.set_enabled("ultimate", False, tr(NOT_SUPPORTED))
+        self.gpu_row.set_enabled("optimize", False, tr(NOT_SUPPORTED))
         self.pending.setEnabled(not b("gpu"))
         self.hz_seg.setEnabled(not b("refresh"))
         self.hz_more.setEnabled(not b("refresh"))
