@@ -490,11 +490,11 @@ def test_chart_uses_edited_profile_colour_not_active_accent(env, qtbot):
 def test_settings_tray_watts_toggle_and_psys_info(env, tmp_path):
     st, ctl, settings = env
     w = SettingsWindow(st, ctl, settings, autostart_path=tmp_path / "a.desktop", project_root=tmp_path / "p q")
-    assert w.sw_watts.isChecked() and settings.value("ui/tray_watts", True, type=bool) is True
-    w.sw_watts.setChecked(False, emit=True)
-    assert settings.value("ui/tray_watts", True, type=bool) is False
+    assert not w.sw_watts.isChecked()                        # logo by default
+    w.sw_watts.setChecked(True, emit=True)
+    assert settings.value("ui/tray_watts", False, type=bool) is True
     w2 = SettingsWindow(st, ctl, settings, autostart_path=tmp_path / "a.desktop")
-    assert not w2.sw_watts.isChecked()
+    assert w2.sw_watts.isChecked()
     st.set_sensors(fake_sensors(psys_available=False))
     assert "izin gerekli" in w.psys_info.text() and "install.sh" in w.psys_info.text()
     assert "'" in w.psys_info.text()                    # path with a space is quoted
@@ -507,6 +507,11 @@ def test_tray_icon_watts_updates_only_on_integer_change(env):
     st, ctl, settings = env
     clk = [1000.0]
     t = Tray(st, ctl, settings, clock=lambda: clk[0])
+    for _ in range(3):                                   # default: logo only, watts only in the tooltip
+        clk[0] += 1.0
+        st.set_sensors(fake_sensors(system_power_w=34.0))
+    assert t._icon_watts is None and t.icon_updates == 0 and "34" in t.icon.toolTip()
+    settings.setValue("ui/tray_watts", True)
     for _ in range(5):                                   # steady 34 W
         clk[0] += 1.0
         st.set_sensors(fake_sensors(system_power_w=34.0))
@@ -526,6 +531,7 @@ def test_tray_icon_watts_updates_only_on_integer_change(env):
     assert t._icon_watts is None                         # back to the logo
     assert watts_pixmap(34, 22).toImage() != watts_pixmap(35, 22).toImage()
     settings.setValue("ui/tray_watts", False)
+    st.set_sensors(fake_sensors(system_power_w=50.0))
     clk[0] += 5
     for _ in range(6):
         st.set_sensors(fake_sensors(system_power_w=50.0))
@@ -564,3 +570,20 @@ def test_enter_eco_stays_pending_without_prompt(env, monkeypatch):
     w.gpu_row.clicked.emit("eco")
     assert len(asked) == 1 and not ctl.rebooted
     assert not w.pending.isHidden() and not w.pending._cancel.isHidden()
+
+
+def test_kbd_light_tray_action_and_main_button(env):
+    st, ctl, settings = env
+    t = Tray(st, ctl, settings)
+    w = MainWindow(st, ctl, settings)
+    assert t.act_light.isChecked() and w.btn_light.isEnabled() and w.btn_light._active
+    w.btn_light.click()
+    assert ("toggle_kbd_light", ()) in ctl.calls
+    assert not t.act_light.isChecked() and not w.btn_light._active
+    t.act_light.trigger()
+    assert t.act_light.isChecked()
+    st.emit_busy("kbd", True)
+    assert not w.btn_light.isEnabled()
+    st.emit_busy("kbd", False)
+    st.set_aura(brightness=None)
+    assert not w.btn_light.isEnabled() and not t.act_light.isEnabled()

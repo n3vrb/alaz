@@ -269,6 +269,7 @@ class NavButton(QAbstractButton):
         super().__init__(parent)
         self._icon = icon
         self._hover = False
+        self._active: str | None = None   # accent colour when the button is "on" (filled)
         self.setText(text)
         self.setToolTip(tooltip)
         self.setAccessibleName(text or tooltip)
@@ -283,6 +284,11 @@ class NavButton(QAbstractButton):
     def sizeHint(self) -> QSize:
         return QSize(44 if not self.text() else 100, 44)
 
+    def set_active(self, accent: str | None) -> None:
+        if accent != self._active:
+            self._active = accent
+            self.update()
+
     def enterEvent(self, e):
         self._hover = True
         self.update()
@@ -296,15 +302,20 @@ class NavButton(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        p.setPen(QPen(QColor(theme.BORDER), 1))
-        p.setBrush(QColor("#272B35") if self._hover else QColor(theme.CONTROL))
+        if self._active and self.isEnabled():
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(self._active).lighter(110) if self._hover else QColor(self._active))
+        else:
+            p.setPen(QPen(QColor(theme.BORDER), 1))
+            p.setBrush(QColor("#272B35") if self._hover else QColor(theme.CONTROL))
         p.drawRoundedRect(r, 10, 10)
         f = theme.ui_font(13, 500)
         p.setFont(f)
         tw = QFontMetrics(f).horizontalAdvance(self.text()) if self.text() else 0
         total = 16 + (8 + tw if tw else 0)
         x = (self.width() - total) / 2
-        draw_icon(p, self._icon, QRectF(x, self.height() / 2 - 8, 16, 16), theme.TEXT, 1.9)
+        fg = theme.INK if (self._active and self.isEnabled()) else theme.TEXT
+        draw_icon(p, self._icon, QRectF(x, self.height() / 2 - 8, 16, 16), fg, 1.9)
         if tw:
             p.setPen(QColor(theme.TEXT))
             p.drawText(QRectF(x + 24, 0, tw + 2, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())

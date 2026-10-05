@@ -54,6 +54,7 @@ _POWER_TO_STR = {
 K_CUSTOM_ACTIVE = "perf/custom_active"
 K_PL = ("custom/pl1", "custom/pl2", "custom/fppt")
 K_AUTO_REFRESH = "display/auto_refresh"
+K_KBD_LAST = "kbd/last_level"
 PPT_PROPS = ("PptPl1Spl", "PptPl2Sppt", "PptFppt")
 # custom and turbo are the same asusd profile (PERFORMANCE): they share one set of fan curves.
 _CURVE_GROUP = {"turbo": ("turbo", "custom"), "custom": ("turbo", "custom")}
@@ -643,6 +644,16 @@ class Controller(QObject):
     def set_kbd_brightness(self, level: int) -> None:
         level = max(0, min(3, int(level)))
         self._pulse("kbd", lambda: self.asusd.set_kbd_brightness(level))
+
+    def toggle_kbd_light(self) -> None:
+        """Keyboard backlight on/off; remembers the last non-zero level (default 2 = Med)."""
+        cur = self.state.aura.brightness
+        if cur is not None and cur > 0:
+            self.settings.setValue(K_KBD_LAST, int(cur))
+            self.set_kbd_brightness(0)
+            return
+        last = self.settings.value(K_KBD_LAST, 2, type=int)
+        self.set_kbd_brightness(max(1, min(3, last)))
 
     def set_kbd_color(self, rgb: tuple[int, int, int]) -> None:
         self._pulse("kbd", lambda: self.asusd.set_aura_static(tuple(rgb)))

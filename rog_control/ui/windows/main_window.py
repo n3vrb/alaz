@@ -170,18 +170,24 @@ class MainWindow(FramelessWindow):
 
         lay.addStretch(1)
         nav = QHBoxLayout()
-        nav.setSpacing(8)
+        nav.setSpacing(6)
         nav.setContentsMargins(0, 0, 0, 14)
         self.btn_fans = NavButton("fan", tr("Fanlar & Güç"))
         self.btn_kbd = NavButton("keyboard", tr("Klavye"))
         self.btn_set = NavButton("settings", tr("Ayarlar"))
         self.btn_mini = NavButton("expand", "", tr("Mini moda geç"))
+        self.btn_light = NavButton("kbd_light", "", tr("Klavye ışığı aç/kapat"))
+        self.btn_light.clicked.connect(self.ctl.toggle_kbd_light)
+        self.state.auraChanged.connect(lambda _v: self._refresh_light())
         self.btn_fans.clicked.connect(self.openFans)
         self.btn_kbd.clicked.connect(self.openKeyboard)
         self.btn_set.clicked.connect(self.openSettings)
         self.btn_mini.clicked.connect(self.openMini)
-        for b in (self.btn_fans, self.btn_kbd, self.btn_set, self.btn_mini):
-            nav.addWidget(b)
+        # Proportional widths so the longest label ("Fanlar & Güç" / "Fans & Power") isn't clipped
+        # now that two 44 px icon buttons share the row.
+        for b, stretch in ((self.btn_fans, 13), (self.btn_kbd, 10), (self.btn_light, 0),
+                           (self.btn_set, 10), (self.btn_mini, 0)):
+            nav.addWidget(b, stretch)
         lay.addLayout(nav)
 
         self.track_accent(self.perf_header, self.perf_row, self.gpu_header, self.gpu_row, self.disp_header, self.od,
@@ -207,6 +213,7 @@ class MainWindow(FramelessWindow):
         self.apply_enabled()
 
     def accent_applied(self, accent: str) -> None:
+        self._refresh_light()
         self.pill.set(PERF_LABEL.get(self.state.perf_mode, ""), accent)
         self.gpu_header.set_accent(accent)
         self.pending.set_accent(self._pending_color())
@@ -351,8 +358,16 @@ class MainWindow(FramelessWindow):
         self.ctl.set_refresh(None if key == "auto" else int(key))
 
     # -------------------------------------------------------------------- busy
+    def _refresh_light(self) -> None:
+        if not hasattr(self, "btn_light"):
+            return
+        br = self.state.aura.brightness
+        self.btn_light.setEnabled(br is not None and not self.is_busy("kbd"))
+        self.btn_light.set_active(self._accent if br else None)
+
     def apply_enabled(self) -> None:
         b = self.is_busy
+        self._refresh_light()
         self.perf_row.setEnabled(not b("perf"))
         self.gpu_row.setEnabled(not b("gpu"))
         self.gpu_row.set_enabled("ultimate", False, tr(NOT_SUPPORTED))

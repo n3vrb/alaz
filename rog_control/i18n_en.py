@@ -178,6 +178,8 @@ EN: dict[str, str] = {
     "Eco   (yeniden başlatma)": "Eco   (needs restart)",
     "Pencereyi aç": "Open window",
     "Mini mod": "Mini mode",
+    "Klavye ışığı": "Keyboard light",
+    "Klavye ışığı aç/kapat": "Toggle keyboard light",
     "Çıkış": "Quit",
     "Profil: {mode}": "Profile: {mode}",
     "ROG Control — Mini": "ROG Control — Mini",

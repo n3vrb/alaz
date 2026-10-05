@@ -246,6 +246,11 @@ class FakeController(QObject):
         self._rec("set_kbd_brightness", level)
         self.state.set_aura(brightness=level)
 
+    def toggle_kbd_light(self) -> None:
+        self._rec("toggle_kbd_light")
+        cur = self.state.aura.brightness
+        self.state.set_aura(brightness=0 if cur else 2)
+
     def set_kbd_color(self, rgb) -> None:
         self._rec("set_kbd_color", tuple(rgb))
         self.state.set_aura(color=tuple(rgb))

@@ -118,6 +118,8 @@ class Tray(QObject):
         state.accentChanged.connect(self._on_accent)
         state.sensorsChanged.connect(self._on_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
+        state.auraChanged.connect(lambda _v: self._refresh_light())
+        self._refresh_light()
         self._refresh_perf()
         self._refresh_gfx()
         self._refresh_info()
@@ -163,6 +165,10 @@ class Tray(QObject):
             a.triggered.connect(lambda _=False, key=k: self._gpu(key))
             self.gpu_actions[k] = a
         self.menu.addSeparator()
+        self.act_light = self.menu.addAction(tr("Klavye ışığı"))
+        self.act_light.setCheckable(True)
+        self.act_light.triggered.connect(lambda _=False: self.ctl.toggle_kbd_light())
+        self.menu.addSeparator()
         self.act_open = self.menu.addAction(tr("Pencereyi aç"))
         self.act_mini = self.menu.addAction(tr("Mini mod"))
         self.act_quit = self.menu.addAction(tr("Çıkış"))
@@ -192,6 +198,11 @@ class Tray(QObject):
         for k, a in self.gpu_actions.items():
             a.setChecked(k == g)
 
+    def _refresh_light(self) -> None:
+        br = self.state.aura.brightness
+        self.act_light.setChecked(bool(br))
+        self.act_light.setEnabled(br is not None)
+
     def _on_accent(self, accent: str) -> None:
         if self._icon_watts is None:
             self.icon.setIcon(make_icon(accent))
@@ -207,7 +218,7 @@ class Tray(QObject):
         """Draw the system watts in the tray icon: at most 1x/s and only when the integer changes."""
         sys_w = self._power_w[0]
         want = None
-        if sys_w is not None and self.settings.value(KEY_TRAY_WATTS, True, type=bool):
+        if sys_w is not None and self.settings.value(KEY_TRAY_WATTS, False, type=bool):
             want = int(round(sys_w))
         if want == self._icon_watts:
             return

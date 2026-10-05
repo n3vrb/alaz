@@ -9,7 +9,7 @@ from rog_control.backend.dbus_util import Typed
 from rog_control.backend.sensors import SensorSnapshot
 from rog_control.backend.types import FanCurve, GfxMode, GfxPower, Profile
 from rog_control.core.controller import Controller
-from rog_control.core.state import AppState
+from rog_control.core.state import AppState, AuraView
 
 
 @dataclass
@@ -497,6 +497,27 @@ def test_sensors_forwarded(env):
     env.sensors.updated.emit(snap)
     assert env.state.sensors is snap
     assert env.state.sensors.battery_power_w == 12.5
+
+
+def test_toggle_kbd_light(env):
+    env.ctl.start()
+    env.asusd.auraChanged.emit("Brightness", 3)
+    env.ctl.toggle_kbd_light()                       # on -> off, remembers 3
+    env.spin()
+    assert env.asusd.calls[-1] == ("kbd", 0)
+    env.asusd.auraChanged.emit("Brightness", 0)
+    env.ctl.toggle_kbd_light()
+    env.spin()
+    assert env.asusd.calls[-1] == ("kbd", 3)
+    env.settings.remove("kbd/last_level")
+    env.asusd.auraChanged.emit("Brightness", 0)
+    env.ctl.toggle_kbd_light()                       # default Med
+    env.spin()
+    assert env.asusd.calls[-1] == ("kbd", 2)
+    env.state.set_aura(AuraView(brightness=None))    # unknown -> assume off
+    env.ctl.toggle_kbd_light()
+    env.spin()
+    assert env.asusd.calls[-1] == ("kbd", 2)
 
 
 def test_aura_state(env):

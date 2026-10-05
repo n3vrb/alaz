@@ -159,7 +159,7 @@ class SettingsWindow(FramelessWindow):
         self._init_autostart_state()
         self.sw_tray.setChecked(settings.value(KEY_TRAY, True, type=bool))
         self.sw_notify.setChecked(settings.value(KEY_NOTIFY, True, type=bool))
-        self.sw_watts.setChecked(settings.value(KEY_TRAY_WATTS, True, type=bool))
+        self.sw_watts.setChecked(settings.value(KEY_TRAY_WATTS, False, type=bool))
         self.sw_watts.toggled.connect(lambda on: self._save(KEY_TRAY_WATTS, on))
         state.sensorsChanged.connect(lambda s: self._refresh_psys(s))
         self._refresh_psys(state.sensors)
