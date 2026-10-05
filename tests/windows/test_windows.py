@@ -587,3 +587,13 @@ def test_kbd_light_tray_action_and_main_button(env):
     st.emit_busy("kbd", False)
     st.set_aura(brightness=None)
     assert not w.btn_light.isEnabled() and not t.act_light.isEnabled()
+
+
+def test_tray_menu_shows_live_power(env):
+    # GNOME's AppIndicator extension hides tray tooltips, so power must be in the menu too.
+    st, ctl, settings = env
+    t = Tray(st, ctl, settings)
+    st.set_sensors(fake_sensors(system_power_w=None, battery_status="Discharging", battery_power_w=12.4))
+    assert t.power.isVisible() and "12 W" in t.power.text()
+    st.set_sensors(fake_sensors(system_power_w=None, battery_status="Full", battery_power_w=None))
+    assert not t.power.isVisible()

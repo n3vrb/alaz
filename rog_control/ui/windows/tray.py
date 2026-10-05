@@ -144,6 +144,10 @@ class Tray(QObject):
     def _build_menu(self) -> None:
         self.head = self._heading("ROG Control")
         self.info = self._heading("")
+        # GNOME's AppIndicator extension doesn't show tray tooltips, so the live power
+        # also lives in the menu (opened by clicking the icon).
+        self.power = self._heading("")
+        self.power.setVisible(False)
         self.menu.addSeparator()
         self._heading(tr("PERFORMANS"))
         self.perf_group = QActionGroup(self.menu)
@@ -250,6 +254,8 @@ class Tray(QObject):
         tip = f"ROG Control — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm"
         ptxt = compose_power(*self._power_w)
         self.icon.setToolTip(tip + ("\n" + tr("Güç: {value}", value=ptxt) if ptxt else ""))
+        self.power.setText(tr("Güç: {value}", value=ptxt) if ptxt else "")
+        self.power.setVisible(bool(ptxt))
 
     def _on_perf(self, mode: str) -> None:
         self._refresh_perf()

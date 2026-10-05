@@ -177,7 +177,11 @@ def test_tray_english():
         st.set_sensors(s)
         texts = [a.text() for a in tray.menu.actions()] + [tray.icon.toolTip()]
         assert_english(texts, "tray")
-    assert [a.text() for a in tray.menu.actions() if a.text()][:3] == ["ROG Control", tray.info.text(), "PERFORMANCE"]
+    texts = [a.text() for a in tray.menu.actions() if a.text() and a.isVisible()]
+    head = ["ROG Control", tray.info.text()] + ([tray.power.text()] if tray.power.isVisible() else [])
+    assert texts[:len(head) + 1] == head + ["PERFORMANCE"]
+    if tray.power.isVisible():
+        assert tray.power.text().startswith("Power: ")
     assert tray.act_quit.text() == "Quit" and tray.act_open.text() == "Open window"
     assert tray.perf_actions["quiet"].text() == "Silent"
 
