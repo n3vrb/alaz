@@ -518,9 +518,10 @@ def test_tray_icon_watts_updates_only_on_integer_change(env):
     for _ in range(5):
         st.set_sensors(fake_sensors(system_power_w=40.0))
     assert t.icon_updates == 1
-    clk[0] += 1.0
-    st.set_sensors(fake_sensors(system_power_w=40.0))
-    assert t._icon_watts == 40 and t.icon_updates == 2
+    for _ in range(60):                                  # AC value is an EMA: let it converge
+        clk[0] += 1.0
+        st.set_sensors(fake_sensors(system_power_w=40.0))
+    assert t._icon_watts == 40 and 2 <= t.icon_updates <= 7   # one redraw per integer step at most
     st.set_sensors(fake_sensors(system_power_w=None, battery_status="Full", battery_power_w=None))
     assert t._icon_watts is None                         # back to the logo
     assert watts_pixmap(34, 22).toImage() != watts_pixmap(35, 22).toImage()
