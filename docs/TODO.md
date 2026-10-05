@@ -4,7 +4,7 @@ Ordered roughly by priority. Each item: why, where, how to verify. Update this f
 discover something. Status as of 2026-10-03. Read `CLAUDE.md` first (hard rules!).
 
 ## Rename follow-ups
-- [ ] **New Alaz logo from the owner** (old R emblem is a placeholder): replace `assets/alaz.png`, `assets/icons/alaz-*.png`, `alaz/ui/icons/alaz-*.png`; `assets/logo.png` still carries the old "ROG Control" wordmark and is no longer used by the READMEs.
+- [x] New Alaz logo — done: Turkic tamga-style emblem chosen by the owner, traced to an exact vector polygon (`tools/alaz_logo_shape.py`), all sizes rendered by `tools/make_logo.py` (re-run it after editing the shape).
 - [ ] Owner: rename the GitHub repo (`gh repo rename alaz -R n3vrb/rog-control`, then `git remote set-url origin https://github.com/n3vrb/alaz.git`).
 
 ## 0. Finish if not done (check `git log` / `git status` first)

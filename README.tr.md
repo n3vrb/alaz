@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/alaz.png" width="140" alt="Alaz amblemi"></p>
+<p align="center"><img src="assets/logo.png" width="200" alt="Alaz logosu"></p>
 
 # Alaz
 
