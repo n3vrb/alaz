@@ -9,10 +9,10 @@ import pytest
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
 
-from rog_control import app as app_mod
-from rog_control.app import Shell
-from rog_control.ui.windows._fake import FakeController, FakeState
-from rog_control.ui.windows.settings_window import UNIT_NAME, SettingsWindow, run_systemctl
+from alaz import app as app_mod
+from alaz.app import Shell
+from alaz.ui.windows._fake import FakeController, FakeState
+from alaz.ui.windows.settings_window import UNIT_NAME, SettingsWindow, run_systemctl
 
 
 @pytest.fixture
@@ -52,9 +52,9 @@ class FakeSctl:
 # ------------------------------------------------------------ settings toggle
 def test_toggle_uses_systemctl_and_removes_legacy(env, tmp_path):
     st, ctl, settings = env
-    unit = tmp_path / "rog-control.service"
+    unit = tmp_path / "alaz.service"
     unit.write_text("[Unit]\n")
-    legacy = tmp_path / "autostart" / "rog-control.desktop"
+    legacy = tmp_path / "autostart" / "alaz.desktop"
     legacy.parent.mkdir()
     legacy.write_text("x")
     sctl = FakeSctl(enabled=False)
@@ -89,8 +89,8 @@ def test_state_reflects_is_enabled_and_failure_reverts(env, tmp_path):
 
 def test_no_unit_falls_back_to_xdg(env, tmp_path, monkeypatch):
     st, ctl, settings = env
-    monkeypatch.setattr("rog_control.ui.windows.settings_window._launcher", lambda: None)
-    path = tmp_path / "autostart" / "rog-control.desktop"
+    monkeypatch.setattr("alaz.ui.windows.settings_window._launcher", lambda: None)
+    path = tmp_path / "autostart" / "alaz.desktop"
     sctl = FakeSctl()
     w = SettingsWindow(st, ctl, settings, autostart_path=path, unit_path=tmp_path / "missing.service",
                        systemctl_runner=sctl)
@@ -184,7 +184,7 @@ def test_normal_quit_exits_zero(monkeypatch, tmp_path):
 def test_warm_up_targets_only_the_bus_daemon(monkeypatch):
     # The warm-up is a sacrificial typed call; it may only ever be addressed to the
     # bus daemon itself (never to ourselves: that logs policy rejections on the system bus).
-    from rog_control.backend import dbus_util
+    from alaz.backend import dbus_util
     sent = []
 
     class Bus:
@@ -195,3 +195,32 @@ def test_warm_up_targets_only_the_bus_daemon(monkeypatch):
     dbus_util._warm_up(Bus())
     assert dbus_util._warmed_up
     assert sent == [("org.freedesktop.DBus", "org.freedesktop.DBus", "GetNameOwner")]
+
+
+def test_legacy_settings_migration(tmp_path, monkeypatch):
+    old_dir = tmp_path / "rog-control"
+    old_dir.mkdir()
+    old = old_dir / "rog-control.conf"
+    src = QSettings(str(old), QSettings.Format.IniFormat)
+    src.setValue("lang", "en")
+    src.setValue("ui/notify", True)
+    src.sync()
+    new = QSettings(str(tmp_path / "alaz" / "alaz.conf"), QSettings.Format.IniFormat)
+    assert app_mod.migrate_legacy_settings(new, old) is True
+    assert new.value("lang") == "en"
+    assert new.value("ui/notify") is not None
+    # the new file now exists -> never overwritten again
+    new.setValue("lang", "tr")
+    new.sync()
+    assert app_mod.migrate_legacy_settings(new, old) is False
+    assert new.value("lang") == "tr"
+
+
+def test_legacy_settings_migration_no_old_file(tmp_path):
+    new = QSettings(str(tmp_path / "alaz.conf"), QSettings.Format.IniFormat)
+    assert app_mod.migrate_legacy_settings(new, tmp_path / "missing.conf") is False
+
+
+def test_legacy_settings_file_uses_xdg(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert app_mod.legacy_settings_file() == tmp_path / "rog-control" / "rog-control.conf"

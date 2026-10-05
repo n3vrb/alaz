@@ -3,7 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from rog_control.backend import sensors as S
+from alaz.backend import sensors as S
 
 
 def w(p, text):

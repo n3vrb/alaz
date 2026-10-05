@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtCore import QCoreApplication, QObject, QSettings, pyqtSignal
 
-from rog_control.backend.dbus_util import Typed
-from rog_control.backend.sensors import SensorSnapshot
-from rog_control.backend.types import FanCurve, GfxMode, GfxPower, Profile
-from rog_control.core.controller import Controller
-from rog_control.core.state import AppState, AuraView
+from alaz.backend.dbus_util import Typed
+from alaz.backend.sensors import SensorSnapshot
+from alaz.backend.types import FanCurve, GfxMode, GfxPower, Profile
+from alaz.core.controller import Controller
+from alaz.core.state import AppState, AuraView
 
 
 @dataclass
@@ -318,7 +318,7 @@ def test_eco_exit_error_codes(env, code, needle):
 
 
 def test_exit_code_fallback_from_text():
-    from rog_control.core.controller import _helper_exit_code
+    from alaz.core.controller import _helper_exit_code
     assert _helper_exit_code("x supergfxd durdurulamadı y") == 7
     assert _helper_exit_code("Eco'dan çıkış tamamlanamadı: z") == 8
     assert _helper_exit_code("helper exited with code 3") == 3

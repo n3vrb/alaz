@@ -7,17 +7,17 @@ import pytest
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtWidgets import QApplication
 
-from rog_control.app import SingleInstance, parse_args
-from rog_control.backend.types import FanCurve
-from rog_control.ui import theme
-from rog_control.ui.windows import dialogs
-from rog_control.ui.windows._fake import FakeController, FakeState, fake_sensors
-from rog_control.ui.windows.fans_window import FansWindow
-from rog_control.ui.windows.keyboard_window import KeyboardWindow
-from rog_control.ui.windows.main_window import MainWindow
-from rog_control.ui.windows.mini_window import MiniWindow
-from rog_control.ui.windows.settings_window import SettingsWindow, autostart_enabled, set_autostart
-from rog_control.ui.windows.tray import Tray
+from alaz.app import SingleInstance, parse_args
+from alaz.backend.types import FanCurve
+from alaz.ui import theme
+from alaz.ui.windows import dialogs
+from alaz.ui.windows._fake import FakeController, FakeState, fake_sensors
+from alaz.ui.windows.fans_window import FansWindow
+from alaz.ui.windows.keyboard_window import KeyboardWindow
+from alaz.ui.windows.main_window import MainWindow
+from alaz.ui.windows.mini_window import MiniWindow
+from alaz.ui.windows.settings_window import SettingsWindow, autostart_enabled, set_autostart
+from alaz.ui.windows.tray import Tray
 
 
 @pytest.fixture
@@ -270,14 +270,14 @@ def test_keyboard_window(env):
 
 def test_settings_autostart_file(env, tmp_path, monkeypatch):
     st, ctl, settings = env
-    path = tmp_path / "autostart" / "rog-control.desktop"
+    path = tmp_path / "autostart" / "alaz.desktop"
     root = tmp_path / "proj"
-    monkeypatch.setattr("rog_control.ui.windows.settings_window._launcher", lambda: None)
+    monkeypatch.setattr("alaz.ui.windows.settings_window._launcher", lambda: None)
     w = SettingsWindow(st, ctl, settings, autostart_path=path, project_root=root)
     assert not path.exists()
     w.sw_autostart.setChecked(True, emit=True)
     text = path.read_text()
-    assert "Exec=python3 -m rog_control --minimized" in text and f"Path={root}" in text
+    assert "Exec=python3 -m alaz --minimized" in text and f"Path={root}" in text
     w.sw_autostart.setChecked(False, emit=True)
     assert not path.exists()
     w.sw_tray.setChecked(False, emit=True)
@@ -290,9 +290,9 @@ def test_settings_autostart_file(env, tmp_path, monkeypatch):
 
 def test_autostart_uses_launcher_when_installed(tmp_path):
     path = tmp_path / "a.desktop"
-    set_autostart(path, True, tmp_path / "proj", launcher="/x/rog-control")
+    set_autostart(path, True, tmp_path / "proj", launcher="/x/alaz")
     text = path.read_text()
-    assert "Exec=rog-control --minimized" in text and "Path=" not in text and "python3" not in text
+    assert "Exec=alaz --minimized" in text and "Path=" not in text and "python3" not in text
 
 
 def test_mini_window(env):
@@ -315,7 +315,7 @@ def test_tray_menu_and_notification(env, monkeypatch):
     shown = []
     monkeypatch.setattr(t.icon, "isVisible", lambda: True)
     monkeypatch.setattr(t.icon, "showMessage", lambda *a, **k: shown.append(a))
-    import rog_control.ui.windows.tray as tray_mod
+    import alaz.ui.windows.tray as tray_mod
     monkeypatch.setattr(tray_mod, "seconds_since_local_perf", lambda: 99.0)   # as if the Fn key changed it
     st.set_perf_mode("quiet")
     assert shown and "Sessiz" in shown[0][1]
@@ -328,7 +328,7 @@ def test_tray_menu_and_notification(env, monkeypatch):
 
 
 def test_single_instance_roundtrip():
-    name = f"rog-control-test-{__import__('os').getpid()}"
+    name = f"alaz-test-{__import__('os').getpid()}"
     first = SingleInstance(name)
     assert not first.notify_existing(100)                 # nobody listening yet
     assert first.listen()
@@ -352,11 +352,11 @@ def test_parse_args():
 
 def test_app_exits_1_without_core(monkeypatch):
     import builtins
-    import rog_control.app as app_mod
+    import alaz.app as app_mod
     real = builtins.__import__
 
     def fake_import(name, *a, **k):
-        if name == "rog_control.core.controller":
+        if name == "alaz.core.controller":
             raise ImportError("missing")
         return real(name, *a, **k)
     monkeypatch.setattr(builtins, "__import__", fake_import)
@@ -365,7 +365,7 @@ def test_app_exits_1_without_core(monkeypatch):
 
 def test_busy_aliases_map_controller_keys():
     # The real Controller emits these keys; windows group them under UI keys.
-    from rog_control.ui.windows._base import BUSY_ALIASES, BUSY_KEYS
+    from alaz.ui.windows._base import BUSY_ALIASES, BUSY_KEYS
     for real, ui in BUSY_ALIASES.items():
         assert ui in BUSY_KEYS
 
@@ -375,8 +375,8 @@ def test_secondary_window_accepts_close_while_quitting(qtbot):
     # secondary windows must accept close once the app is quitting.
     from PyQt6.QtGui import QCloseEvent
     from PyQt6.QtWidgets import QApplication
-    from rog_control.ui.windows._fake import FakeController, FakeState
-    from rog_control.ui.windows.fans_window import FansWindow
+    from alaz.ui.windows._fake import FakeController, FakeState
+    from alaz.ui.windows.fans_window import FansWindow
     st = FakeState(); w = FansWindow(st, FakeController(st)); qtbot.addWidget(w)
     app = QApplication.instance()
     app.setProperty("rog_quitting", False)
@@ -475,7 +475,7 @@ def test_custom_sliders_show_clamped_values(env, qtbot):
 
 
 def test_chart_uses_edited_profile_colour_not_active_accent(env, qtbot):
-    from rog_control.ui.windows._base import PERF_COLOR
+    from alaz.ui.windows._base import PERF_COLOR
     st, ctl, settings = env                      # active mode: balanced
     w = FansWindow(st, ctl)
     qtbot.addWidget(w)
@@ -503,7 +503,7 @@ def test_settings_tray_watts_toggle_and_psys_info(env, tmp_path):
 
 
 def test_tray_icon_watts_updates_only_on_integer_change(env):
-    from rog_control.ui.windows.tray import watts_pixmap
+    from alaz.ui.windows.tray import watts_pixmap
     st, ctl, settings = env
     clk = [1000.0]
     t = Tray(st, ctl, settings, clock=lambda: clk[0])

@@ -14,10 +14,10 @@ import pytest
 from PyQt6.QtCore import QCoreApplication, QElapsedTimer
 from PyQt6.QtDBus import QDBusConnection
 
-from rog_control.backend import asusd, dbus_util
-from rog_control.backend.asusd import AsusdClient
-from rog_control.backend.dbus_util import Typed, Variant
-from rog_control.backend.types import FanCurve, Profile
+from alaz.backend import asusd, dbus_util
+from alaz.backend.asusd import AsusdClient
+from alaz.backend.dbus_util import Typed, Variant
+from alaz.backend.types import FanCurve, Profile
 
 app = QCoreApplication.instance() or QCoreApplication([])
 

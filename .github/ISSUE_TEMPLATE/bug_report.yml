@@ -27,5 +27,5 @@ body:
         asusctl --version
         asusctl -s
         supergfxctl -V && supergfxctl -s && supergfxctl -g && supergfxctl -S
-        journalctl --user -u rog-control -b --no-pager | tail -50
+        journalctl --user -u alaz -b --no-pager | tail -50
       render: text

@@ -1,3 +1,6 @@
+> **Not:** Uygulama sonradan **Alaz** olarak yeniden adlandırıldı (eski adı ROG Control). Bu tarihsel kayıt
+> eski adları (`rog-control`, `rog_control`, `org.rogcontrol.gfx`) bilerek olduğu gibi bırakır.
+
 # Aşama 0 — Sistem düzeltmesi (Eco modu + sürücü + güç profili çakışması)
 
 > Bu adımlar `sudo` gerektirir; kullanıcı kendisi çalıştırır. Her adımdan sonra

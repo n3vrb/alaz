@@ -1,17 +1,19 @@
-<p align="center"><img src="assets/logo.png" width="220" alt="ROG Control logo"></p>
+<p align="center"><img src="assets/alaz.png" width="140" alt="Alaz amblemi"></p>
 
-# ROG Control
+# Alaz
 
 ASUS ROG dizüstü bilgisayarlar için Linux'ta çalışan, [G-Helper](https://github.com/seerge/g-helper)'dan esinlenmiş bir kontrol merkezi. `asusd` ve `supergfxd` üzerine kuruludur.
 
-[![Tests](https://github.com/n3vrb/rog-control/actions/workflows/tests.yml/badge.svg)](.github/workflows/tests.yml)
+*Eski adı ROG Control.* Alaz, eski Türkçede "alev" demek. ASUS ile bağlantısı olmayan bağımsız bir projedir; ASUS ve ROG, ASUSTeK Computer Inc.'in ticari markalarıdır.
+
+[![Tests](https://github.com/n3vrb/alaz/actions/workflows/tests.yml/badge.svg)](.github/workflows/tests.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 [English](README.md) | Türkçe
 
 > **Durum: erken aşamada, yalnızca tek makinede test edildi.** Core Ultra 9 285H ve RTX 5070 Laptop'lu bir ASUS ROG Zephyrus (2025) üzerinde, Zorin OS 18 (GNOME, Wayland) ile geliştirildi ve doğrulandı. Diğer modellerde davranış farklı olabilir. Bkz. [Güvenlik ve sınırlamalar](#8-güvenlik-ve-sınırlamalar).
 >
-> **Arayüz İngilizce ve Türkçe olarak sunulur.** Dil sistem yerel ayarına göre seçilir (`tr` ile başlıyorsa Türkçe, aksi halde İngilizce); Ayarlar → Dil bölümünden değiştirilebilir (yeniden başlatınca uygulanır). Yeni çeviriler memnuniyetle karşılanır: bkz. `rog_control/i18n.py` ve `rog_control/i18n_en.py`.
+> **Arayüz İngilizce ve Türkçe olarak sunulur.** Dil sistem yerel ayarına göre seçilir (`tr` ile başlıyorsa Türkçe, aksi halde İngilizce); Ayarlar → Dil bölümünden değiştirilebilir (yeniden başlatınca uygulanır). Yeni çeviriler memnuniyetle karşılanır: bkz. `alaz/i18n.py` ve `alaz/i18n_en.py`.
 
 <p align="center">
   <img src="docs/screenshots/tr/main-balanced.png" width="300" alt="Ana pencere, Dengeli mod">
@@ -58,7 +60,7 @@ Ekran görüntüleri sahte verilerle üretilmiştir (`tools/screenshot_windows.p
 
 Mevcut araçların çoğu GPU'yu canlı değiştirebileceğini varsayar. Bu donanımda değiştiremezsin; güvenilir bir Eco modu için birbiriyle ilgisiz bir dizi sorunu bulmak gerekti. Aşağıdaki özetin her maddesi komutlar ve geri alma adımlarıyla **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)** dosyasında anlatılıyor (İngilizce). Hepsi yalnızca yukarıdaki referans makinede doğrulandı.
 
-- **Canlı GPU geçişi GNOME'u bozar.** Oturum açıkken `supergfxctl -m`, Eco'ya girerken gnome-shell ve Xwayland'i öldürdü, Eco'dan çıkarken Wayland gnome-shell'i dondurdu. Bu yüzden ROG Control GPU modunu **yalnızca açılışta** değiştirir, canlı geçişi hiç çağırmaz.
+- **Canlı GPU geçişi GNOME'u bozar.** Oturum açıkken `supergfxctl -m`, Eco'ya girerken gnome-shell ve Xwayland'i öldürdü, Eco'dan çıkarken Wayland gnome-shell'i dondurdu. Bu yüzden Alaz GPU modunu **yalnızca açılışta** değiştirir, canlı geçişi hiç çağırmaz.
 - **Eco'ya giriş:** `/etc/supergfxd.conf` içinde `"mode": "Integrated"` yap ve yeniden başlat.
 - **Eco'dan çıkış (hile):** supergfxd Eco'dan kendiliğinden çıkmaz (`dgpu_disable=1` görünce modu yine Integrated'a zorlar). Çalışan sıra: supergfxd'yi durdur, `/sys/bus/pci/drivers_autoprobe` değerini `0` yap, yapılandırmada modu Hybrid yap, `dgpu_disable=0` yaz, **yeniden başlat**. Kart sürücüsüz geri gelir; masaüstü çalışırken yeni bir GPU belirmez.
 - **Plymouth, Eco girişini şansa bağladı.** Açılış logosu, o an mevcut tek DRM aygıtı olan NVIDIA'yı (~4,5. saniye) açıyordu; supergfxd'nin `rmmod nvidia` komutu "module in use" ile başarısız oldu ve Eco yarım kaldı. Çekirdek satırından `splash` kaldırmak sorunu çözdü; bedeli yaklaşık 6,5 sn daha uzun açılış.
@@ -78,15 +80,15 @@ Mevcut araçların çoğu GPU'yu canlı değiştirebileceğini varsayar. Bu dona
 - **Yetki:** polkit + `pkexec` yardımcısı, yalnızca açılış modu yapılandırması ve Eco çıkışı için; bir udev kuralı yalnızca RAPL `psys` sayacını açar.
 
 ```
-rog_control/
+alaz/
 ├── app.py, __main__.py   giriş noktası, tek örnek, tepsi, bağlantılar
 ├── backend/              asusd.py, gfx.py, sensors.py, display.py, dbus_util.py, types.py
 ├── core/                 state.py (AppState: veri + sinyaller), controller.py (tek yazma yolu)
 └── ui/                   theme.py, widgets/ (kutucuklar, fan grafiği, kartlar, kontroller), windows/
 helper/
-├── rog-control-gfx-helper         root yardımcı (yalnızca standart kütüphane)
-├── org.rogcontrol.gfx.policy      polkit eylemi
-├── 90-rog-control-rapl.rules      udev kuralı (yalnızca RAPL psys)
+├── alaz-gfx-helper         root yardımcı (yalnızca standart kütüphane)
+├── org.alaz.gfx.policy      polkit eylemi
+├── 90-alaz-rapl.rules      udev kuralı (yalnızca RAPL psys)
 └── install.sh / uninstall.sh      ayrıcalıklı kurulum, sudo ile çalışır
 tests/                             pytest, ekransız (offscreen) Qt
 tools/                             ekran görüntüsü ve widget galeri betikleri
@@ -99,27 +101,27 @@ Pencereler `AppState`'i okur ve `Controller`'ı çağırır; backend'lerle doğr
 ### Uygulama (sudo gerekmez)
 
 ```bash
-git clone https://github.com/n3vrb/rog-control.git
-cd rog-control
+git clone https://github.com/n3vrb/alaz.git
+cd alaz
 ./install.sh
 ```
 
-Uygulamayı `~/.local/share/rog-control` altına, başlatıcıyı `~/.local/bin/rog-control` olarak, bir masaüstü girdisi ve bir simge ile birlikte kurar. `~/.local/bin` dizininin `PATH` içinde olduğundan emin ol.
+Uygulamayı `~/.local/share/alaz` altına, başlatıcıyı `~/.local/bin/alaz` olarak, bir masaüstü girdisi ve bir simge ile birlikte kurar. `~/.local/bin` dizininin `PATH` içinde olduğundan emin ol.
 
 ### Oturum açılışında başlatma
 
 ```bash
 ./install.sh --autostart                  # systemd kullanıcı servisini kurar ve etkinleştirir
-journalctl --user -u rog-control -f       # günlükler
-systemctl --user restart rog-control      # yeniden başlat
-systemctl --user disable --now rog-control   # kapat (veya Ayarlar'daki anahtar)
+journalctl --user -u alaz -f       # günlükler
+systemctl --user restart alaz      # yeniden başlat
+systemctl --user disable --now alaz   # kapat (veya Ayarlar'daki anahtar)
 ```
 
 Servis, oturum açılınca uygulamayı tepside küçültülmüş başlatır (tepsi hazır olana kadar en fazla 20 sn bekler). Hemen başlatmak için `--start` ekle.
 
 ### İlk çalıştırma
 
-Uygulama menüsünden **ROG Control**'ü aç ya da `rog-control` komutunu çalıştır. Performans modları, fan eğrileri, güç limitleri, ekran ve klavye kontrolleri `asusd` çalışır çalışmaz kullanılabilir. GPU modu geçişi ve toplam güç göstergesi için aşağıdaki isteğe bağlı bölüm gerekir.
+Uygulama menüsünden **Alaz**'ü aç ya da `alaz` komutunu çalıştır. Performans modları, fan eğrileri, güç limitleri, ekran ve klavye kontrolleri `asusd` çalışır çalışmaz kullanılabilir. GPU modu geçişi ve toplam güç göstergesi için aşağıdaki isteğe bağlı bölüm gerekir.
 
 ### İsteğe bağlı ayrıcalıklı yardımcı (sudo gerekir)
 
@@ -131,9 +133,9 @@ sudo ./helper/install.sh
 
 | Dosya | Amaç |
 |---|---|
-| `/usr/local/libexec/rog-control-gfx-helper` | `pkexec` ile çalışan root yardımcı |
-| `/usr/share/polkit-1/actions/org.rogcontrol.gfx.policy` | polkit eylemi (`auth_admin_keep`) |
-| `/etc/udev/rules.d/90-rog-control-rapl.rules` | RAPL `psys` sayacını okunabilir yapar |
+| `/usr/local/libexec/alaz-gfx-helper` | `pkexec` ile çalışan root yardımcı |
+| `/usr/share/polkit-1/actions/org.alaz.gfx.policy` | polkit eylemi (`auth_admin_keep`) |
+| `/etc/udev/rules.d/90-alaz-rapl.rules` | RAPL `psys` sayacını okunabilir yapar |
 
 **Yardımcının yapabildikleri:** yalnızca `/etc/supergfxd.conf` içindeki `"mode"` anahtarını (Integrated veya Hybrid) yedek alarak ve atomik biçimde değiştirir; Eco'dan çıkarken test edilmiş Eco çıkış sırasını (supergfxd'yi durdur, `drivers_autoprobe=0`, `dgpu_disable=0`) çalıştırır. Symlink olan yapılandırmayı reddeder, tüm girdiyi doğrular ve MUX doğrudan dGPU'ya ayarlıyken Eco'yu reddeder.
 
@@ -185,7 +187,7 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest tests
 QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots/tr --lang tr   # pencereleri sahte durumla çiz
 ```
 
-Test takımında 262 test var (backend'ler, core controller ve state, widget'lar, pencereler, root yardımcı) ve ekransız çalışır. **Testler gerçek sisteme asla yazmaz**; yazma yolları mock, sahte nesneler ve yeniden köklendirilmiş yardımcıyla (`ROG_CONTROL_HELPER_TESTROOT`, yalnızca root değilken geçerli) sınanır.
+Test takımında 262 test var (backend'ler, core controller ve state, widget'lar, pencereler, root yardımcı) ve ekransız çalışır. **Testler gerçek sisteme asla yazmaz**; yazma yolları mock, sahte nesneler ve yeniden köklendirilmiş yardımcıyla (`ALAZ_HELPER_TESTROOT`, yalnızca root değilken geçerli) sınanır.
 
 Katkı kuralları ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) kaynaklı): GUI thread'ini asla bloklama; `supergfxctl -m` ya da supergfxd `SetMode`/`SetConfig` çağırma; izleme için dGPU'yu uyandırma; okunamayan değer `None` olur ve uydurma sayı yerine tire olarak görünür; `print` yerine `logging` kullan. Değişikliğinle birlikte test ekle ya da güncelle. Pull request'ler memnuniyetle karşılanır; özellikle: çeviriler, diğer ROG modelleri, Ultimate/MUX desteği, diğer masaüstü ortamları.
 
@@ -195,7 +197,7 @@ Bu proje Anthropic'in Claude'u ile tasarlandı ve yönetildi: bir orkestratör m
 
 ## 10. Teşekkürler
 
-- [asusctl / asusd ve supergfxctl](https://asus-linux.org): asus-linux.org projesi; ROG Control yalnızca onların servislerine bir ön yüzdür.
+- [asusctl / asusd ve supergfxctl](https://asus-linux.org): asus-linux.org projesi; Alaz yalnızca onların servislerine bir ön yüzdür.
 - Özellik setine ve görünüme ilham veren [G-Helper](https://github.com/seerge/g-helper) (seerge).
 - Tipografi için tasarım referansı olarak IBM Plex Sans.
 

@@ -7,16 +7,16 @@ import pytest
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QAbstractButton, QApplication, QLabel, QMenu, QWidget
 
-from rog_control import i18n
-from rog_control.core.state import AppState
-from rog_control.ui.windows import dialogs
-from rog_control.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors
-from rog_control.ui.windows.fans_window import FansWindow
-from rog_control.ui.windows.keyboard_window import KeyboardWindow
-from rog_control.ui.windows.main_window import MainWindow
-from rog_control.ui.windows.mini_window import MiniWindow
-from rog_control.ui.windows.settings_window import SettingsWindow
-from rog_control.ui.windows.tray import Tray
+from alaz import i18n
+from alaz.core.state import AppState
+from alaz.ui.windows import dialogs
+from alaz.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors
+from alaz.ui.windows.fans_window import FansWindow
+from alaz.ui.windows.keyboard_window import KeyboardWindow
+from alaz.ui.windows.main_window import MainWindow
+from alaz.ui.windows.mini_window import MiniWindow
+from alaz.ui.windows.settings_window import SettingsWindow
+from alaz.ui.windows.tray import Tray
 
 TURKISH_CHARS = re.compile("[çğıİöşüÇĞÖŞÜ]")
 TURKISH_WORDS = re.compile(
@@ -178,7 +178,7 @@ def test_tray_english():
         texts = [a.text() for a in tray.menu.actions()] + [tray.icon.toolTip()]
         assert_english(texts, "tray")
     texts = [a.text() for a in tray.menu.actions() if a.text() and a.isVisible()]
-    head = ["ROG Control", tray.info.text()] + ([tray.power.text()] if tray.power.isVisible() else [])
+    head = ["Alaz", tray.info.text()] + ([tray.power.text()] if tray.power.isVisible() else [])
     assert texts[:len(head) + 1] == head + ["PERFORMANCE"]
     if tray.power.isVisible():
         assert tray.power.text().startswith("Power: ")

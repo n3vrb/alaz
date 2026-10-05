@@ -20,7 +20,7 @@ SCRIPT = textwrap.dedent("""
     from PyQt6.QtCore import QCoreApplication, QTimer
     from PyQt6.QtDBus import QDBusConnection
     app = QCoreApplication([])
-    from rog_control.backend import dbus_util as du
+    from alaz.backend import dbus_util as du
     bus = QDBusConnection.connectToBus(addr, "quirk")
     out = []
     du.async_call(bus, "org.example.Nope", "/x", "org.example.I", "M",

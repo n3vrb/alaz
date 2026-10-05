@@ -1,17 +1,19 @@
-<p align="center"><img src="assets/logo.png" width="220" alt="ROG Control logo"></p>
+<p align="center"><img src="assets/alaz.png" width="140" alt="Alaz emblem"></p>
 
-# ROG Control
+# Alaz
 
 A [G-Helper](https://github.com/seerge/g-helper)-inspired control centre for ASUS ROG laptops on Linux, built on top of `asusd` and `supergfxd`.
 
-[![Tests](https://github.com/n3vrb/rog-control/actions/workflows/tests.yml/badge.svg)](.github/workflows/tests.yml)
+*Formerly ROG Control.* Alaz means "flame" in Old Turkish. It is an independent project, not affiliated with ASUS; ASUS and ROG are trademarks of ASUSTeK Computer Inc.
+
+[![Tests](https://github.com/n3vrb/alaz/actions/workflows/tests.yml/badge.svg)](.github/workflows/tests.yml)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 English | [Türkçe](README.tr.md)
 
 > **Status: early, tested on one machine.** Developed and verified on an ASUS ROG Zephyrus (2025) with Core Ultra 9 285H and RTX 5070 Laptop on Zorin OS 18 (GNOME, Wayland). Other models may behave differently. See [Safety and limitations](#8-safety-and-limitations).
 >
-> **The interface is available in English and Turkish.** The language follows your system locale (Turkish if it starts with `tr`, otherwise English); change it under Settings → Language (applies after a restart). More translations are welcome: see `rog_control/i18n.py` and `rog_control/i18n_en.py`.
+> **The interface is available in English and Turkish.** The language follows your system locale (Turkish if it starts with `tr`, otherwise English); change it under Settings → Language (applies after a restart). More translations are welcome: see `alaz/i18n.py` and `alaz/i18n_en.py`.
 
 <p align="center">
   <img src="docs/screenshots/main-balanced.png" width="300" alt="Main window, Balanced mode">
@@ -58,7 +60,7 @@ The screenshots are rendered with fake data (`tools/screenshot_windows.py`), so 
 
 Most existing tools assume you can switch the GPU live. On this hardware you cannot, and getting reliable Eco mode meant finding a chain of unrelated problems. This is the condensed result; every item is written up with commands and rollbacks in **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)**. All of it was verified only on the reference machine above.
 
-- **Live GPU switching breaks GNOME.** `supergfxctl -m` while the session runs killed gnome-shell and Xwayland when entering Eco, and froze Wayland gnome-shell when leaving it. So ROG Control **only changes the GPU mode at boot** and never calls the live switch.
+- **Live GPU switching breaks GNOME.** `supergfxctl -m` while the session runs killed gnome-shell and Xwayland when entering Eco, and froze Wayland gnome-shell when leaving it. So Alaz **only changes the GPU mode at boot** and never calls the live switch.
 - **Entering Eco:** set `"mode": "Integrated"` in `/etc/supergfxd.conf` and reboot.
 - **Leaving Eco (the trick):** supergfxd refuses to leave Eco on its own (it forces Integrated again when it sees `dgpu_disable=1`). The working sequence is: stop supergfxd, set `/sys/bus/pci/drivers_autoprobe` to `0`, set the config mode to Hybrid, write `dgpu_disable=0`, **reboot**. The card comes back with no driver bound, so no new GPU appears while the desktop runs.
 - **Plymouth made Eco entry racy.** The boot splash opened the NVIDIA DRM device (the only one present at about 4.5 s), so supergfxd's `rmmod nvidia` failed with "module in use" and Eco ended half-done. Removing `splash` from the kernel command line fixed it, at the price of a boot that is about 6.5 s longer.
@@ -78,15 +80,15 @@ Most existing tools assume you can switch the GPU live. On this hardware you can
 - **Privilege:** polkit + `pkexec` helper, used only for the boot-mode config and the Eco exit; a udev rule exposes only the RAPL `psys` counter.
 
 ```
-rog_control/
+alaz/
 ├── app.py, __main__.py   entry point, single instance, tray, wiring
 ├── backend/              asusd.py, gfx.py, sensors.py, display.py, dbus_util.py, types.py
 ├── core/                 state.py (AppState: data + signals), controller.py (the only write path)
 └── ui/                   theme.py, widgets/ (tiles, fan chart, cards, controls), windows/
 helper/
-├── rog-control-gfx-helper         root helper (stdlib only)
-├── org.rogcontrol.gfx.policy      polkit action
-├── 90-rog-control-rapl.rules      udev rule (RAPL psys only)
+├── alaz-gfx-helper         root helper (stdlib only)
+├── org.alaz.gfx.policy      polkit action
+├── 90-alaz-rapl.rules      udev rule (RAPL psys only)
 └── install.sh / uninstall.sh      privileged install, run with sudo
 tests/                             pytest, offscreen Qt
 tools/                             screenshot and widget gallery scripts
@@ -99,27 +101,27 @@ The windows read `AppState` and call `Controller`; they never talk to the backen
 ### The app (no sudo)
 
 ```bash
-git clone https://github.com/n3vrb/rog-control.git
-cd rog-control
+git clone https://github.com/n3vrb/alaz.git
+cd alaz
 ./install.sh
 ```
 
-This installs the app under `~/.local/share/rog-control`, a launcher `~/.local/bin/rog-control`, a desktop entry and an icon. Make sure `~/.local/bin` is on your `PATH`.
+This installs the app under `~/.local/share/alaz`, a launcher `~/.local/bin/alaz`, a desktop entry and an icon. Make sure `~/.local/bin` is on your `PATH`.
 
 ### Start at login
 
 ```bash
 ./install.sh --autostart                  # installs and enables the systemd user service
-journalctl --user -u rog-control -f       # logs
-systemctl --user restart rog-control      # restart
-systemctl --user disable --now rog-control   # turn off (or use the toggle in Settings)
+journalctl --user -u alaz -f       # logs
+systemctl --user restart alaz      # restart
+systemctl --user disable --now alaz   # turn off (or use the toggle in Settings)
 ```
 
 The service starts the app minimised to the tray after login (it waits up to 20 s for the tray host). Add `--start` to also start it right away.
 
 ### First run
 
-Start **ROG Control** from the application menu, or run `rog-control`. Performance modes, fan curves, power limits, display and keyboard controls work as soon as `asusd` is running. GPU mode switching and the total-power readout need the optional part below.
+Start **Alaz** from the application menu, or run `alaz`. Performance modes, fan curves, power limits, display and keyboard controls work as soon as `asusd` is running. GPU mode switching and the total-power readout need the optional part below.
 
 ### Optional privileged helper (needs sudo)
 
@@ -131,9 +133,9 @@ It installs three files:
 
 | File | Purpose |
 |---|---|
-| `/usr/local/libexec/rog-control-gfx-helper` | root helper, run through `pkexec` |
-| `/usr/share/polkit-1/actions/org.rogcontrol.gfx.policy` | polkit action (`auth_admin_keep`) |
-| `/etc/udev/rules.d/90-rog-control-rapl.rules` | makes the RAPL `psys` counter readable |
+| `/usr/local/libexec/alaz-gfx-helper` | root helper, run through `pkexec` |
+| `/usr/share/polkit-1/actions/org.alaz.gfx.policy` | polkit action (`auth_admin_keep`) |
+| `/etc/udev/rules.d/90-alaz-rapl.rules` | makes the RAPL `psys` counter readable |
 
 **What the helper can do:** edit only the `"mode"` key of `/etc/supergfxd.conf` (Integrated or Hybrid), atomically with a backup; and, when leaving Eco, run the tested Eco-exit sequence (stop supergfxd, `drivers_autoprobe=0`, `dgpu_disable=0`). It refuses a symlinked config, validates all input, and refuses Eco when the MUX is set to dGPU direct.
 
@@ -185,7 +187,7 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest tests
 QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots --lang en   # render windows with fake state
 ```
 
-The suite has 262 tests (backends, core controller and state, widgets, windows, the root helper) and runs offscreen. **Tests never write to the real system**; write paths are exercised with mocks, fakes and a re-rooted helper (`ROG_CONTROL_HELPER_TESTROOT`, honoured only when not root).
+The suite has 262 tests (backends, core controller and state, widgets, windows, the root helper) and runs offscreen. **Tests never write to the real system**; write paths are exercised with mocks, fakes and a re-rooted helper (`ALAZ_HELPER_TESTROOT`, honoured only when not root).
 
 Ground rules for contributions (from [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)): never block the GUI thread; never call `supergfxctl -m` or supergfxd `SetMode`/`SetConfig`; do not wake the dGPU for monitoring; unreadable values become `None` and show as an em dash, never an invented number; use `logging`, not `print`. Add or update tests with your change. Pull requests are welcome, especially: translations, other ROG models, Ultimate/MUX support, other desktop environments.
 
@@ -195,7 +197,7 @@ This project was designed and orchestrated with Anthropic's Claude: an orchestra
 
 ## 10. Credits
 
-- [asusctl / asusd and supergfxctl](https://asus-linux.org): the asus-linux.org project; ROG Control is only a front end for their daemons.
+- [asusctl / asusd and supergfxctl](https://asus-linux.org): the asus-linux.org project; Alaz is only a front end for their daemons.
 - [G-Helper](https://github.com/seerge/g-helper) by seerge, the inspiration for the feature set and the look.
 - IBM Plex Sans, used as the design reference for the typography.
 

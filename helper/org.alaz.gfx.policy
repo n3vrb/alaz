@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Alaz</vendor>
+  <action id="org.alaz.gfx.set-boot-mode">
+    <description>Change the GPU boot mode (applied at next reboot; leaving Eco also re-enables the dGPU now)</description>
+    <description xml:lang="tr">GPU açılış modunu değiştir (yeniden başlatmada uygulanır; Eco'dan çıkış dGPU'yu hemen yeniden etkinleştirir)</description>
+    <message>Authentication is required to change the GPU mode (this may stop supergfxd and re-enable the dGPU)</message>
+    <message xml:lang="tr">GPU modunu değiştirmek için kimlik doğrulaması gerekir (supergfxd durdurulabilir, dGPU yeniden etkinleştirilebilir)</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/alaz-gfx-helper</annotate>
+  </action>
+</policyconfig>

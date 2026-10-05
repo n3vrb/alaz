@@ -1,6 +1,6 @@
 # System setup and troubleshooting guide
 
-This guide documents the system-level changes that made ROG Control reliable on the
+This guide documents the system-level changes that made Alaz reliable on the
 machine it was developed on, and the dead ends we hit on the way. It is a record of what
 worked **on one machine**, not a universal recipe.
 
@@ -96,14 +96,14 @@ systemctl is-active supergfxd
 ### 3a. power-profiles-daemon
 
 **Why.** `power-profiles-daemon` and `asusd` both write the kernel's `platform_profile`.
-Whichever wrote last won, so profiles changed behind your back. ROG Control talks to asusd,
+Whichever wrote last won, so profiles changed behind your back. Alaz talks to asusd,
 so give asusd sole ownership.
 
 ```bash
 sudo systemctl mask power-profiles-daemon
 ```
 
-Side effect: GNOME's built-in power mode selector disappears. ROG Control's tray menu and
+Side effect: GNOME's built-in power mode selector disappears. Alaz's tray menu and
 mini window replace it.
 
 **Verify:** `systemctl is-enabled power-profiles-daemon` prints `masked`.
@@ -189,7 +189,7 @@ AER errors first (`journalctl -k | grep -i aer`).
 **Apply.** Set the default by entry title and regenerate:
 
 ```bash
-sudo cp /etc/default/grub /etc/default/grub.bak-rogcontrol
+sudo cp /etc/default/grub /etc/default/grub.bak-alaz
 grep -E "^(menuentry|submenu)" /boot/grub/grub.cfg | cut -d"'" -f2   # list exact titles
 sudo nano /etc/default/grub
 #   GRUB_DEFAULT="Windows Boot Manager (on <disk-partition>)"
@@ -199,7 +199,7 @@ sudo update-grub
 (`GRUB_DEFAULT=saved` with `GRUB_SAVEDEFAULT=true` is another approach; it was not tested
 here.)
 
-**Roll back.** `sudo cp /etc/default/grub.bak-rogcontrol /etc/default/grub && sudo update-grub`
+**Roll back.** `sudo cp /etc/default/grub.bak-alaz /etc/default/grub && sudo update-grub`
 
 ---
 
@@ -207,7 +207,7 @@ here.)
 
 Prerequisites: sections 2, 3b and 4 applied. Run these on battery with no external monitor
 attached (an external DP/HDMI port wired to the dGPU does not work in Eco, which is
-expected). ROG Control's GPU Mode tiles do exactly these things through a small root
+expected). Alaz's GPU Mode tiles do exactly these things through a small root
 helper; the manual versions are for when you want to do it by hand or the app is not
 installed.
 
@@ -282,10 +282,10 @@ carries a `0000:` prefix).
 
 1. **Live switching with `supergfxctl -m ...`.** Entering Eco live killed gnome-shell and
    Xwayland (session crash). Leaving Eco live froze Wayland gnome-shell while it hot-plugged
-   the new GPU. Both directions are unsafe on this machine. ROG Control never calls it.
+   the new GPU. Both directions are unsafe on this machine. Alaz never calls it.
 
 2. **Blacklisting automatic NVIDIA loading** (a `modprobe.d` file such as
-   `rog-control-nvidia-noauto.conf`). It removed the "fallen off the bus" warnings in Eco, but
+   `alaz-nvidia-noauto.conf`). It removed the "fallen off the bus" warnings in Eco, but
    in Hybrid the driver was then loaded later (about 3.6 s, by supergfxd). Because supergfxd
    is `Type=dbus`, GDM does not wait for it, so GDM's Xorg crashed with "Failed to create
    pixmap": four boots in a row with a black screen. The file was deleted and the initramfs
@@ -306,7 +306,7 @@ carries a `0000:` prefix).
 ## 10. Other things worth knowing
 
 - **Polling `nvidia-smi` wakes the GPU.** Every run resets the runtime-suspend timer, so a
-  monitor that polls it keeps the dGPU awake forever. ROG Control only calls `nvidia-smi`
+  monitor that polls it keeps the dGPU awake forever. Alaz only calls `nvidia-smi`
   when the PCI device's `runtime_status` is `active` and a real process holds `/dev/nvidiaN`
   open. Compositors (gnome-shell, Xwayland) keep that device node open permanently without
   keeping the GPU awake, so they are not counted. Check status for your own scripts with
@@ -314,10 +314,10 @@ carries a `0000:` prefix).
 
 - **Windows dual boot.** Windows G-Helper's Eco leaves `dgpu_disable=1`. Linux then boots with
   the card gone. With `hotplug_type: Asus` (section 2) supergfxd adopts that as Integrated
-  instead of fighting it. ROG Control shows a banner when it sees this mismatch.
+  instead of fighting it. Alaz shows a banner when it sees this mismatch.
 
 - **Total system power.** The RAPL `psys` counter gives whole-platform power, but it is
-  root-only by default. ROG Control ships a udev rule that makes only that one counter
+  root-only by default. Alaz ships a udev rule that makes only that one counter
   world-readable (see the README for the security note). On the reference machine it read
   about 1-2 W above the real draw measured on battery.
 

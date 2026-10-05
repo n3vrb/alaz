@@ -15,18 +15,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PyQt6.QtCore import QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
-from rog_control import i18n  # noqa: E402
-from rog_control.i18n import tr  # noqa: E402
-from rog_control.ui import theme  # noqa: E402
-from rog_control.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors  # noqa: E402
-from rog_control.ui.windows import dialogs  # noqa: E402
-from rog_control.ui.windows.main_window import PERF_COLOR_GPU  # noqa: E402
-from rog_control.ui.windows.fans_window import FansWindow  # noqa: E402
-from rog_control.ui.windows.keyboard_window import KeyboardWindow  # noqa: E402
-from rog_control.ui.windows.main_window import MainWindow  # noqa: E402
-from rog_control.ui.windows.mini_window import MiniWindow  # noqa: E402
-from rog_control.ui.windows.settings_window import SettingsWindow  # noqa: E402
-from rog_control.ui.windows.tray import Tray  # noqa: E402
+from alaz import i18n  # noqa: E402
+from alaz.i18n import tr  # noqa: E402
+from alaz.ui import theme  # noqa: E402
+from alaz.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors  # noqa: E402
+from alaz.ui.windows import dialogs  # noqa: E402
+from alaz.ui.windows.main_window import PERF_COLOR_GPU  # noqa: E402
+from alaz.ui.windows.fans_window import FansWindow  # noqa: E402
+from alaz.ui.windows.keyboard_window import KeyboardWindow  # noqa: E402
+from alaz.ui.windows.main_window import MainWindow  # noqa: E402
+from alaz.ui.windows.mini_window import MiniWindow  # noqa: E402
+from alaz.ui.windows.settings_window import SettingsWindow  # noqa: E402
+from alaz.ui.windows.tray import Tray  # noqa: E402
 
 
 def snap(app, w, path: Path) -> None:

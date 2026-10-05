@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from rog_control import i18n
-from rog_control.backend.types import GfxMode, Profile
+from alaz import i18n
+from alaz.backend.types import GfxMode, Profile
 from tests.core.test_controller import Env
 
 TURKISH = re.compile("[çğıİöşüÇĞÖŞÜ]|\\b(Bekleyen|Geçersiz|Yeniden)\\b")

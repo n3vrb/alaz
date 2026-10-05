@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rog-control"
+name = "alaz"
 version = "0.1.0"
 description = "G-Helper-style control app for ASUS ROG laptops on Linux (asusd / supergfxd)"
 readme = "README.md"
@@ -19,10 +19,10 @@ classifiers = [
 dependencies = ["PyQt6>=6.4", "psutil>=5.9"]
 
 [project.scripts]
-rog-control = "rog_control.app:main"
+alaz = "alaz.app:main"
 
 [tool.setuptools.packages.find]
-include = ["rog_control*"]
+include = ["alaz*"]
 
 [tool.setuptools.package-data]
-"rog_control.ui" = ["icons/*.png"]
+"alaz.ui" = ["icons/*.png"]

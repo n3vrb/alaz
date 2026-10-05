@@ -1,4 +1,4 @@
-from rog_control.ui.power_text import PowerSmoother, power_line, power_text
+from alaz.ui.power_text import PowerSmoother, power_line, power_text
 
 
 def test_texts():
@@ -29,7 +29,7 @@ def test_smoother_average_and_reset():
 
 import pytest  # noqa: E402
 
-from rog_control.ui.power_text import PowerView, compose_power  # noqa: E402
+from alaz.ui.power_text import PowerView, compose_power  # noqa: E402
 
 
 @pytest.mark.parametrize("psys,status,bat,expect", [

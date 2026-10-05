@@ -1,4 +1,4 @@
-from rog_control.core.state import ACCENTS, AppState, AuraView, DisplayView, GfxView
+from alaz.core.state import ACCENTS, AppState, AuraView, DisplayView, GfxView
 
 
 def test_defaults():

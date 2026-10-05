@@ -1,4 +1,4 @@
-from rog_control.backend.types import Epp, FanCurve, GfxMode, GfxPower, Profile
+from alaz.backend.types import Epp, FanCurve, GfxMode, GfxPower, Profile
 
 
 def test_profile_values():

@@ -6,8 +6,8 @@ import pytest  # noqa: E402
 from PyQt6.QtCore import QPoint, Qt  # noqa: E402
 from PyQt6.QtTest import QSignalSpy  # noqa: E402
 
-from rog_control.ui import theme  # noqa: E402
-from rog_control.ui.widgets import (Banner, FanCurveChart, ModeTileRow, PendingCard, SectionHeader,  # noqa: E402
+from alaz.ui import theme  # noqa: E402
+from alaz.ui.widgets import (Banner, FanCurveChart, ModeTileRow, PendingCard, SectionHeader,  # noqa: E402
                                     Segmented, SensorPanel, ToggleSwitch, ValueSlider)
 
 OPTS = [("Eco", "Eco", "leaf", "#34C08A"), ("Standart", "Standart", "layers", "#4C8DFF"),

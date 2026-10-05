@@ -1,0 +1,3 @@
+# Alaz: make ONLY the RAPL "psys" (platform) energy counter world-readable so the app can show
+# total system power. Package/core/dram domains are never touched.
+ACTION=="add|change", SUBSYSTEM=="powercap", ATTR{name}=="psys", RUN+="/bin/chmod 0444 /sys%p/energy_uj"

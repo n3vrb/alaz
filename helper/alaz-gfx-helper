@@ -1,0 +1,274 @@
+#!/usr/bin/python3 -I
+# -*- coding: utf-8 -*-
+"""alaz-gfx-helper: privileged helper (run via pkexec).
+
+Edits the "mode" key of the supergfxd BOOT config; the GPU switch itself happens
+at next reboot. Never calls supergfxctl / supergfxd D-Bus, never reboots.
+
+The ONE exception is leaving Eco (dgpu_disable == 1 -> Hybrid), which runs the
+tested Eco-exit procedure (docs/PHASE0_SYSTEM_FIX.md, "Eco döngüsü ÇÖZÜLDÜ"):
+  1. config mode -> Hybrid (first, so a crash later still boots safely: with
+     dgpu_disable=1 supergfxd forces Integrated at boot)
+  2. /usr/bin/systemctl stop supergfxd.service   (the only subprocess allowed;
+     absolute path, minimal env, no shell. supergfxd must not race the next
+     steps; it is not restarted, the reboot that follows starts it again)
+  3. echo 0 > /sys/bus/pci/drivers_autoprobe     (no driver binds the dGPU when
+     it reappears, so gnome-shell never sees a new GPU; resets on reboot)
+  4. echo 0 > .../asus-nb-wmi/dgpu_disable       (may block 5-10 s)
+  5. verify dgpu_disable reads 0
+A reboot is REQUIRED right after (drivers_autoprobe stays 0 until then).
+
+Usage:
+  alaz-gfx-helper set-boot-mode {integrated|hybrid}
+  alaz-gfx-helper status
+
+Exit codes: 0 ok/no change, 2 usage, 3 (reserved, unused; was "Eco-exit
+unsupported"), 4 MUX direct refuses Eco, 5 not root, 6 config error
+(symlink/invalid/IO), 7 stopping supergfxd failed (config rolled back),
+8 sysfs write/verify failed during Eco exit (config stays Hybrid,
+drivers_autoprobe restored best effort).
+
+TEST MODE (design note): paths and the "am I root" answer normally come from
+the real system (os.geteuid(), /etc, /sys). When the hidden env var
+ALAZ_HELPER_TESTROOT is set AND euid != 0, every path (including the
+systemctl executable) is re-rooted under that directory and root-ness is taken
+from ALAZ_HELPER_FAKE_ROOT=1. When euid == 0 (i.e. under pkexec) both
+variables are IGNORED, so they cannot be used to redirect a real root run.
+Only the stdlib is used; no $PATH reliance.
+"""
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+
+CONFIG = "/etc/supergfxd.conf"
+BACKUP = "/etc/supergfxd.conf.alaz.bak"
+DGPU_DISABLE = "/sys/devices/platform/asus-nb-wmi/dgpu_disable"
+GPU_MUX_MODE = "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode"
+AUTOPROBE = "/sys/bus/pci/drivers_autoprobe"
+SYSTEMCTL = "/usr/bin/systemctl"
+SUPERGFXD_UNIT = "supergfxd.service"
+CLEAN_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+
+ENV_ROOT = "ALAZ_HELPER_TESTROOT"
+ENV_FAKE = "ALAZ_HELPER_FAKE_ROOT"
+
+USAGE = ("Kullanım / Usage:\n"
+         "  alaz-gfx-helper set-boot-mode {integrated|hybrid}\n"
+         "  alaz-gfx-helper status\n")
+
+MODES = {"integrated": "Integrated", "hybrid": "Hybrid"}
+_MODE_RE = re.compile(r'("mode"\s*:\s*)"([^"\\]*)"')
+
+
+class HelperError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+        self.msg = msg
+
+
+def resolve_env(environ, euid):
+    """Return (paths dict, is_root). Test env is honoured only if euid != 0."""
+    paths = {"config": CONFIG, "backup": BACKUP,
+             "dgpu_disable": DGPU_DISABLE, "gpu_mux_mode": GPU_MUX_MODE,
+             "autoprobe": AUTOPROBE, "systemctl": SYSTEMCTL}
+    if euid == 0:
+        return paths, True
+    root = environ.get(ENV_ROOT)
+    if not root:
+        return paths, False
+    paths = {k: os.path.join(root, v.lstrip("/")) for k, v in paths.items()}
+    return paths, environ.get(ENV_FAKE) == "1"
+
+
+def _read_int(path):
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _read_config(path):
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise HelperError(6, "Yapılandırma bir symlink, reddedildi / config is a symlink, refusing")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except HelperError:
+        raise
+    except OSError as e:
+        raise HelperError(6, "Yapılandırma okunamadı / cannot read config: %s" % e)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        raw = f.read()
+    try:
+        text = raw.decode("utf-8")
+        data = json.loads(text)
+    except ValueError as e:
+        raise HelperError(6, "Geçersiz JSON / invalid JSON: %s" % e)
+    if not isinstance(data, dict) or not isinstance(data.get("mode"), str):
+        raise HelperError(6, "Beklenmeyen yapılandırma / unexpected config structure")
+    return text, data, st
+
+
+def _atomic_write(path, text, mode, uid, gid, do_chown):
+    d = os.path.dirname(path)
+    tmp = os.path.join(d, ".%s.alaz.tmp.%d" % (os.path.basename(path), os.getpid()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+            if do_chown:
+                os.fchown(f.fileno(), uid, gid)
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def _write_sysfs(path, value):
+    with open(path, "w") as f:
+        f.write(value)
+
+
+def _stop_supergfxd(systemctl):
+    """Run `systemctl stop supergfxd.service`; return None on success else a message."""
+    try:
+        r = subprocess.run([systemctl, "stop", SUPERGFXD_UNIT], timeout=30, check=False,
+                           env=dict(CLEAN_ENV), stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+    return None if r.returncode == 0 else "systemctl çıkış kodu / exit code %d" % r.returncode
+
+
+def _eco_exit_rest(paths, restore, err):
+    """Steps 2-5 of the Eco exit. `restore` rolls the config back (or None).
+    Returns an exit code (0 = success)."""
+    msg = _stop_supergfxd(paths["systemctl"])
+    if msg is not None:
+        note = ""
+        if restore is not None:
+            try:
+                restore()
+            except (OSError, HelperError) as e:
+                note = " (yapılandırma geri alınamadı / config rollback failed: %s)" % e
+        err.write("supergfxd durdurulamadı, hiçbir değişiklik yapılmadı / "
+                  "could not stop supergfxd, nothing changed: %s%s\n" % (msg, note))
+        return 7
+    problem = None
+    autoprobe_off = False
+    try:
+        _write_sysfs(paths["autoprobe"], "0")
+        autoprobe_off = True
+        _write_sysfs(paths["dgpu_disable"], "0")
+        if _read_int(paths["dgpu_disable"]) != 0:
+            problem = "dgpu_disable 0 olarak doğrulanamadı / dgpu_disable did not read back 0"
+    except OSError as e:
+        problem = "sysfs yazma hatası / sysfs write error: %s" % e
+    if problem is not None:
+        try:
+            _write_sysfs(paths["autoprobe"], "1")
+        except OSError:
+            pass
+        err.write("Eco'dan çıkış tamamlanamadı / Eco exit failed: %s. Yapılandırma Hybrid kaldı; "
+                  "yeniden başlatınca dGPU kapalıyken sistem güvenle Eco'da açılır / config "
+                  "stays Hybrid, a reboot safely lands in Eco\n" % problem)
+        return 8
+    return 0
+
+
+def cmd_status(paths, out, err):
+    try:
+        _, data, _ = _read_config(paths["config"])
+        mode = data["mode"]
+    except HelperError:
+        mode = None
+    out.write(json.dumps({"configured_mode": mode,
+                          "dgpu_disable": _read_int(paths["dgpu_disable"]),
+                          "gpu_mux_mode": _read_int(paths["gpu_mux_mode"])}) + "\n")
+    return 0
+
+
+def cmd_set(target_arg, paths, is_root, euid, out, err):
+    if not is_root:
+        err.write("root yetkisi gerekli / root privileges required\n")
+        return 5
+    target = MODES[target_arg]
+    try:
+        text, data, st = _read_config(paths["config"])
+        if target == "Integrated" and _read_int(paths["gpu_mux_mode"]) == 0:
+            err.write("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz / "
+                      "Eco cannot be combined with dGPU-direct MUX mode\n")
+            return 4
+        eco_exit = (target == "Hybrid" and _read_int(paths["dgpu_disable"]) == 1
+                    and _read_int(paths["gpu_mux_mode"]) != 0)
+        restore = None
+        if data["mode"] == target:
+            if not eco_exit:
+                out.write("değişiklik yok / no change\n")
+                return 0
+        else:
+            if len(_MODE_RE.findall(text)) != 1:
+                raise HelperError(6, "'mode' anahtarı belirsiz / ambiguous 'mode' key")
+            new_text = _MODE_RE.sub(lambda m: '%s"%s"' % (m.group(1), target), text, count=1)
+            new_data = json.loads(new_text)
+            expect = dict(data)
+            expect["mode"] = target
+            if new_data != expect or list(new_data) != list(data):
+                raise HelperError(6, "Doğrulama başarısız / verification failed")
+            real = (euid == 0)
+            _atomic_write(paths["backup"], text, 0o644, st.st_uid, st.st_gid, real)
+            _atomic_write(paths["config"], new_text, 0o644, st.st_uid, st.st_gid, real)
+            restore = lambda: _atomic_write(paths["config"], text, 0o644, st.st_uid, st.st_gid, real)
+        if eco_exit:
+            code = _eco_exit_rest(paths, restore, err)
+            if code:
+                return code
+            out.write(json.dumps({"ok": True, "boot_mode": "Hybrid", "reboot_required": True,
+                                  "eco_exit": True}) + "\n")
+            return 0
+    except HelperError as e:
+        err.write(e.msg + "\n")
+        return e.code
+    except OSError as e:
+        err.write("Yazma hatası / write error: %s\n" % e)
+        return 6
+    out.write(json.dumps({"ok": True, "boot_mode": target, "reboot_required": True}) + "\n")
+    return 0
+
+
+def main(argv=None, environ=None, euid=None, out=None, err=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    environ = os.environ if environ is None else environ
+    euid = os.geteuid() if euid is None else euid
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    paths, is_root = resolve_env(environ, euid)
+    if len(argv) == 1 and argv[0] == "status":
+        return cmd_status(paths, out, err)
+    if len(argv) == 2 and argv[0] == "set-boot-mode" and argv[1] in MODES:
+        return cmd_set(argv[1], paths, is_root, euid, out, err)
+    err.write(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

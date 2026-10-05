@@ -8,9 +8,9 @@ import pytest
 from PyQt6.QtCore import QCoreApplication, QElapsedTimer
 from PyQt6.QtDBus import QDBusConnection
 
-from rog_control.backend import dbus_util, gfx
-from rog_control.backend.gfx import GfxClient
-from rog_control.backend.types import GfxMode, GfxPower
+from alaz.backend import dbus_util, gfx
+from alaz.backend.gfx import GfxClient
+from alaz.backend.types import GfxMode, GfxPower
 
 app = QCoreApplication.instance() or QCoreApplication([])
 
@@ -155,7 +155,7 @@ def test_nvidia_pci_path_scan(tmp_path):
 
 
 def test_defaults_match_contract():
-    assert gfx.HELPER_PATH == "/usr/local/libexec/rog-control-gfx-helper"
+    assert gfx.HELPER_PATH == "/usr/local/libexec/alaz-gfx-helper"
     c = GfxClient()
     assert c.helper_path == gfx.HELPER_PATH and c.launcher == ["pkexec"]
 
@@ -199,7 +199,7 @@ def test_request_boot_mode_command_line(mode, arg):
     results = []
     c.request_boot_mode(mode, lambda ok, msg: results.append((ok, msg)))
     proc = FakeProcess.instances[0]
-    assert proc.started == ("pkexec", ["/usr/local/libexec/rog-control-gfx-helper", "set-boot-mode", arg])
+    assert proc.started == ("pkexec", ["/usr/local/libexec/alaz-gfx-helper", "set-boot-mode", arg])
     proc.out = b"done\n"
     proc.finished.slots[0](0, None)
     assert results == [(True, "done")]

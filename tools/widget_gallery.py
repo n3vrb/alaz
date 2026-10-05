@@ -16,8 +16,8 @@ from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout,  # noqa: E402
                              QWidget)
 
-from rog_control.ui import theme  # noqa: E402
-from rog_control.ui.widgets import (Banner, FanCurveChart, ModeTileRow, PendingCard, SectionHeader,  # noqa: E402
+from alaz.ui import theme  # noqa: E402
+from alaz.ui.widgets import (Banner, FanCurveChart, ModeTileRow, PendingCard, SectionHeader,  # noqa: E402
                                     Segmented, SensorPanel, ToggleSwitch, ValueSlider, strong)
 
 C = theme.MODE_COLORS

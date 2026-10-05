@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from PyQt6.QtCore import QSettings
 
-from rog_control import i18n
-from rog_control.i18n_en import EN
+from alaz import i18n
+from alaz.i18n_en import EN
 
 ROOT = Path(__file__).resolve().parent.parent
 TURKISH_CHARS = re.compile("[çğıİöşüÇĞÖŞÜ]")
@@ -55,7 +55,7 @@ def test_missing_translation_returns_turkish_and_logs_once(caplog):
     i18n.set_language("en")
     text = "Bu çeviri yok {x}"
     i18n._missing_logged.discard(text)
-    with caplog.at_level(logging.DEBUG, logger="rog_control.i18n"):
+    with caplog.at_level(logging.DEBUG, logger="alaz.i18n"):
         assert i18n.tr(text, x=1) == "Bu çeviri yok 1"
         assert i18n.tr(text, x=2) == "Bu çeviri yok 2"
     assert sum("no en translation" in r.message for r in caplog.records) == 1
@@ -97,7 +97,7 @@ def test_english_entries_clean_and_placeholders_match():
 
 def _literal_tr_keys() -> set[str]:
     keys = set()
-    for p in (ROOT / "rog_control").rglob("*.py"):
+    for p in (ROOT / "alaz").rglob("*.py"):
         if p.name in ("i18n.py", "i18n_en.py", "icons.py"):
             continue
         for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
@@ -114,8 +114,8 @@ def test_every_literal_tr_key_has_english():
 
 def test_tables_translated():
     """Strings that reach tr() through module-level tables / dialog arguments."""
-    from rog_control.ui.widgets import cards
-    from rog_control.ui.windows import dialogs, fans_window, keyboard_window, main_window, tray
+    from alaz.ui.widgets import cards
+    from alaz.ui.windows import dialogs, fans_window, keyboard_window, main_window, tray
     tables = [main_window.PERF_DESC.values(), main_window.GPU_DESC.values(), main_window.BAT_STATUS.values(),
               main_window.GPU_REBOOT_SUB.values(), [main_window.NOT_SUPPORTED, "Açık işlerini kaydet."],
               tray.BAT_STATUS.values(), cards._BATT.values(), [t for _k, t, _n in fans_window.EPP_KEYS],

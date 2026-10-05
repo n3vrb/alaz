@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-HELPER = Path(__file__).resolve().parents[2] / "helper" / "rog-control-gfx-helper"
+HELPER = Path(__file__).resolve().parents[2] / "helper" / "alaz-gfx-helper"
 ORIG = """{
   "mode": "Hybrid",
   "vfio_enable": false,
@@ -69,9 +69,9 @@ def test_integrated_preserves_format(tree):
 
 def test_backup_and_no_tmp_left(tree):
     run(tree, ["set-boot-mode", "integrated"])
-    assert (tree / "etc/supergfxd.conf.rog-control.bak").read_text() == ORIG
+    assert (tree / "etc/supergfxd.conf.alaz.bak").read_text() == ORIG
     assert sorted(p.name for p in (tree / "etc").iterdir()) == [
-        "supergfxd.conf", "supergfxd.conf.rog-control.bak"]
+        "supergfxd.conf", "supergfxd.conf.alaz.bak"]
 
 
 def test_atomic_replace_used(tree, monkeypatch):
@@ -238,7 +238,7 @@ def test_no_change(tree):
     rc, out, _ = run(tree, ["set-boot-mode", "hybrid"])
     assert rc == 0 and "no change" in out
     assert conf(tree).read_text() == ORIG
-    assert not (tree / "etc/supergfxd.conf.rog-control.bak").exists()
+    assert not (tree / "etc/supergfxd.conf.alaz.bak").exists()
 
 
 @pytest.mark.parametrize("args", [
@@ -272,7 +272,7 @@ def test_status_readonly(tree):
     assert rc == 0
     assert json.loads(out) == {"configured_mode": "Hybrid", "dgpu_disable": 0, "gpu_mux_mode": 1}
     assert conf(tree).read_text() == ORIG
-    assert not (tree / "etc/supergfxd.conf.rog-control.bak").exists()
+    assert not (tree / "etc/supergfxd.conf.alaz.bak").exists()
 
 
 def test_invalid_json(tree):

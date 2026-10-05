@@ -3,7 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from rog_control.backend import display as D
+from alaz.backend import display as D
 
 
 def mode(mid, w, h, hz, cur=False):

@@ -1,26 +1,26 @@
-# CLAUDE.md — ROG Control
+# CLAUDE.md — Alaz
 
 Read this first. Then `docs/TODO.md` (what to do next), `docs/ARCHITECTURE.md` (module contracts),
 `docs/SYSTEM_SETUP.md` (system-level findings) and, for deep history, `docs/PHASE0_SYSTEM_FIX.md` (Turkish dev log).
 
 ## What this is
-ROG Control: a G-Helper-inspired PyQt6 control app for ASUS ROG laptops on Linux, built on the
-`asusd` (asusctl 6.0.12) and `supergfxd` (5.2.7) D-Bus APIs. Public repo: github.com/n3vrb/rog-control (GPL-3.0).
+Alaz (formerly ROG Control; "alev" in Old Turkish): a G-Helper-inspired PyQt6 control app for ASUS ROG laptops on Linux, built on the
+`asusd` (asusctl 6.0.12) and `supergfxd` (5.2.7) D-Bus APIs. Public repo: github.com/n3vrb/alaz (GPL-3.0).
 Reference machine: ROG Zephyrus 2025, Intel Core Ultra 9 285H, RTX 5070 Laptop, Zorin OS 18 (GNOME 46, Wayland).
-The owner is Turkish; talk to them in Turkish. UI is Turkish + English (`rog_control/i18n.py`).
+The owner is Turkish; talk to them in Turkish. UI is Turkish + English (`alaz/i18n.py`).
 
 ## Layout
-- `rog_control/backend/` — asusd.py, gfx.py (supergfxd, read-only + helper call), sensors.py, display.py, dbus_util.py, types.py
-- `rog_control/core/` — state.py (AppState: data + signals), controller.py (THE only write path)
-- `rog_control/ui/` — theme.py, widgets/, windows/ (main, fans, keyboard, settings, mini, tray, dialogs, _fake.py for offscreen renders)
+- `alaz/backend/` — asusd.py, gfx.py (supergfxd, read-only + helper call), sensors.py, display.py, dbus_util.py, types.py
+- `alaz/core/` — state.py (AppState: data + signals), controller.py (THE only write path)
+- `alaz/ui/` — theme.py, widgets/, windows/ (main, fans, keyboard, settings, mini, tray, dialogs, _fake.py for offscreen renders)
 - `helper/` — root GPU helper (pkexec), polkit policy, RAPL psys udev rule, install/uninstall (sudo)
-- `packaging/rog-control.service` — systemd user service (autostart); `install.sh` / `uninstall.sh` — user install (no sudo)
+- `packaging/alaz.service` — systemd user service (autostart); `install.sh` / `uninstall.sh` — user install (no sudo)
 - `tests/` — pytest, offscreen Qt; `tools/` — screenshot_windows.py, widget_gallery.py
 
 ## Commands
 - Tests: `.venv/bin/python -m pytest tests -q` (venv has system site-packages + pytest-qt). Run the WHOLE suite, ideally a few times (one flaky offscreen paint segfault was seen once).
 - Render windows with fake state: `QT_QPA_PLATFORM=offscreen .venv/bin/python tools/screenshot_windows.py <outdir>` — LOOK at the PNGs after UI changes.
-- Installed copy runs from `~/.local/share/rog-control` via the user service: after changing code the owner runs `./install.sh && systemctl --user restart rog-control`. Logs: `journalctl --user -u rog-control -f`.
+- Installed copy runs from `~/.local/share/alaz` via the user service: after changing code the owner runs `./install.sh && systemctl --user restart alaz`. Logs: `journalctl --user -u alaz -f`.
 - Git identity is configured to `n3vrb <178571977+n3vrb@users.noreply.github.com>`; never commit with another email. Push only when the owner asks.
 
 ## Hard rules (each one was learned the hard way on real hardware)

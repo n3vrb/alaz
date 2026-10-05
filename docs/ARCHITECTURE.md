@@ -1,14 +1,14 @@
-# ROG Control — Mimari ve modül sözleşmeleri
+# Alaz — Mimari ve modül sözleşmeleri
 
-Yeni uygulama: `rog_control/` paketi, **PyQt6** (6.6, Qt 6.4), Python 3.12. Çalıştırma: `python3 -m rog_control`.
+Yeni uygulama: `alaz/` paketi, **PyQt6** (6.6, Qt 6.4), Python 3.12. Çalıştırma: `python3 -m alaz`.
 Eski `asus_helper/` sadece referanstır; içinden kod **import edilmez** (gerekirse mantık kopyalanır).
 
-Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.dc.html` (B v2). Arayüz metni İngilizce ve Türkçe: kodda kaynak metin Türkçedir ve `rog_control/i18n.py` içindeki `tr()` ile çevrilir (İngilizce sözlük: `rog_control/i18n_en.py`; dil: QSettings `ui/language` = auto|en|tr, başlangıçta uygulanır). Kullanıcıya görünen her yeni metin `tr(...)` ile sarılmalı ve İngilizce karşılığı eklenmelidir (`tests/test_i18n.py` eksikleri yakalar).
+Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.dc.html` (B v2). Arayüz metni İngilizce ve Türkçe: kodda kaynak metin Türkçedir ve `alaz/i18n.py` içindeki `tr()` ile çevrilir (İngilizce sözlük: `alaz/i18n_en.py`; dil: QSettings `ui/language` = auto|en|tr, başlangıçta uygulanır). Kullanıcıya görünen her yeni metin `tr(...)` ile sarılmalı ve İngilizce karşılığı eklenmelidir (`tests/test_i18n.py` eksikleri yakalar).
 
 ## Değişmez kurallar (hepsi zorunlu)
 
 1. **GUI thread asla bloklanmaz.** Tüm D-Bus çağrıları **asenkron** (`QDBusConnection.asyncCall` + `QDBusPendingCallWatcher`) veya worker thread'de. `subprocess` sadece worker thread'de.
-2. **`supergfxctl -m` / supergfxd `SetMode` / `SetConfig` ASLA çağrılmaz.** GPU modu değişikliği yalnızca `helper/rog-control-gfx-helper` (pkexec) ile ve **yeniden başlatma gerektiren** bir istek olarak yapılır. (Sebep: bu sistemde canlı GPU geçişi gnome-shell'i öldürüyor/donduruyor.)
+2. **`supergfxctl -m` / supergfxd `SetMode` / `SetConfig` ASLA çağrılmaz.** GPU modu değişikliği yalnızca `helper/alaz-gfx-helper` (pkexec) ile ve **yeniden başlatma gerektiren** bir istek olarak yapılır. (Sebep: bu sistemde canlı GPU geçişi gnome-shell'i öldürüyor/donduruyor.)
 3. **dGPU'yu gereksiz uyandırma.** `nvidia-smi` yalnızca `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status == "active"` iken çağrılır (yol, supergfxd'nin bildirdiği/PCI'da bulunan NVIDIA aygıtından türetilir). Aksi halde GPU "Uyku".
 4. **Testlerde gerçek sisteme yazma YOK.** Okuma serbest. Yazma yolları mock/fake ile test edilir.
 5. Her modül `logging.getLogger(__name__)` kullanır; `print` yok.
@@ -17,7 +17,7 @@ Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.
 ## Paket yapısı
 
 ```
-rog_control/
+alaz/
 ├── __main__.py            # main()
 ├── app.py                 # QApplication, pencereler, tray kurulumu (Dalga 2)
 ├── core/
@@ -34,13 +34,13 @@ rog_control/
 │   ├── widgets/…          # bileşenler                            (Dalga 1-C)
 │   └── windows/…          # MainWindow, FansWindow, MiniWindow, Tray (Dalga 2)
 helper/
-├── rog-control-gfx-helper # root yardımcı (python3)               (Dalga 1-D)
-├── org.rogcontrol.gfx.policy
+├── alaz-gfx-helper # root yardımcı (python3)               (Dalga 1-D)
+├── org.alaz.gfx.policy
 └── install.sh / uninstall.sh
 tests/                     # pytest; QT_QPA_PLATFORM=offscreen
 ```
 
-## Ortak enum'lar (`rog_control/backend/types.py` — Dalga 1-A yazar, herkes import eder)
+## Ortak enum'lar (`alaz/backend/types.py` — Dalga 1-A yazar, herkes import eder)
 
 ```python
 class Profile(enum.IntEnum):      # asusd ThrottleThermalPolicy değerleri
@@ -123,7 +123,7 @@ mode: GfxMode | None; power: GfxPower | None; supported: list[GfxMode]
 def configured_boot_mode(self) -> GfxMode | None   # /etc/supergfxd.conf "mode" (okuma, herkes okuyabilir)
 def dgpu_disabled(self) -> bool | None             # sysfs dgpu_disable
 def request_boot_mode(self, mode: GfxMode, callback: Callable[[bool, str], None]) -> None
-    # pkexec helper/rog-control-gfx-helper set-boot-mode <integrated|hybrid> (QProcess, async)
+    # pkexec helper/alaz-gfx-helper set-boot-mode <integrated|hybrid> (QProcess, async)
     # yeniden başlatma gerektirir; canlı hiçbir şey değiştirmez
 def nvidia_pci_path(self) -> str | None            # "/sys/bus/pci/devices/0000:01:00.0" (lspci yerine sysfs taraması: vendor 0x10de, class 0x03xxxx)
 ```
@@ -159,18 +159,18 @@ Widget'lar (her biri bağımsız, backend import ETMEZ): `ModeTile`, `ModeTileRo
 8 nokta sürüklenebilir, X 20–100 °C, Y 0–100 %, anlık sıcaklık çizgisi, seçili nokta etiketi, ok tuşları), `PendingCard`, `Banner`, `ValueSlider`.
 
 ### `helper/` (Dalga 1-D)
-`rog-control-gfx-helper set-boot-mode {integrated|hybrid}` (root, pkexec):
+`alaz-gfx-helper set-boot-mode {integrated|hybrid}` (root, pkexec):
 - `/etc/supergfxd.conf` JSON'unu okur, sadece `"mode"` alanını değiştirir (`Integrated`/`Hybrid`), atomik yazar (tmp + rename), yedek tutar.
 - `hybrid` iken ve `dgpu_disable == 1` ise: test edilmiş Eco-çıkış prosedürü (PHASE0 son bölüm): config→Hybrid, `/usr/bin/systemctl stop supergfxd.service`, `drivers_autoprobe=0`, `dgpu_disable=0`, doğrula.
   Başarıda `{"ok":true,"boot_mode":"Hybrid","reboot_required":true,"eco_exit":true}`; yeniden başlatma HEMEN gerekir. Kodlar: 7 = supergfxd durdurulamadı (config geri alındı), 8 = sysfs yazma/doğrulama hatası (autoprobe geri alınır, config Hybrid kalır), 3 = ayrılmış/kullanılmıyor.
 - Asla `supergfxctl -m` ya da reboot çağırmaz; tek alt süreç yukarıdaki systemctl stop (mutlak yol, temiz env, shell yok). Girdi doğrulaması sıkı; bilinmeyen argüman → çıkış 2.
-`org.rogcontrol.gfx.policy`: `auth_admin_keep`. `install.sh`: helper'ı `/usr/local/libexec/`, policy'yi `/usr/share/polkit-1/actions/` altına kopyalar (çalıştırmak kullanıcıya kalır).
+`org.alaz.gfx.policy`: `auth_admin_keep`. `install.sh`: helper'ı `/usr/local/libexec/`, policy'yi `/usr/share/polkit-1/actions/` altına kopyalar (çalıştırmak kullanıcıya kalır).
 
 ---
 
 ## Dalga 2 sözleşmesi — `core/` ↔ `ui/windows/`
 
-Dalga 1'in gerçek API'leri kaynak koddadır (`rog_control/backend/*.py`, `rog_control/ui/widgets/*.py`); sözleşmeden
+Dalga 1'in gerçek API'leri kaynak koddadır (`alaz/backend/*.py`, `alaz/ui/widgets/*.py`); sözleşmeden
 sapmalar orada belgelendi (ör. `AsusdClient(bus=None, parent=None)`, `availableChanged`, `Typed/Variant`). Okuyun.
 
 ### Uygulama modu kavramı
@@ -226,7 +226,7 @@ GPU için sadece `gfx.request_boot_mode` (helper) — Eco çıkışı başarıl�
 
 ### `ui/windows/` (Dalga 2-F)
 `MainWindow` (V2Main), `FansWindow` (V2Fans), `KeyboardWindow` (parlaklık Segmented + 16 renk swatch + uygula),
-`SettingsWindow` (oturumda başlat → `~/.config/autostart/rog-control.desktop`, tepside küçült, bildirimler),
+`SettingsWindow` (oturumda başlat → `~/.config/autostart/alaz.desktop`, tepside küçült, bildirimler),
 `MiniWindow` + `Tray` (V2MiniTray). Pencereler YALNIZCA `AppState` okur/dinler ve `Controller` çağırır.
 `app.py`: QApplication, `theme.apply`, backend nesneleri, state, controller, pencereler, tray; tek örnek (QLocalServer ile ikinci
 başlatma mevcut pencereyi öne getirir); `--minimized`. `__main__.py`: `main()`.

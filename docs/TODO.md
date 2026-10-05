@@ -1,17 +1,21 @@
-# TODO — ROG Control
+# TODO — Alaz
 
 Ordered roughly by priority. Each item: why, where, how to verify. Update this file when you finish or
 discover something. Status as of 2026-10-03. Read `CLAUDE.md` first (hard rules!).
 
+## Rename follow-ups
+- [ ] **New Alaz logo from the owner** (old R emblem is a placeholder): replace `assets/alaz.png`, `assets/icons/alaz-*.png`, `alaz/ui/icons/alaz-*.png`; `assets/logo.png` still carries the old "ROG Control" wordmark and is no longer used by the READMEs.
+- [ ] Owner: rename the GitHub repo (`gh repo rename alaz -R n3vrb/rog-control`, then `git remote set-url origin https://github.com/n3vrb/alaz.git`).
+
 ## 0. Finish if not done (check `git log` / `git status` first)
-- [x] **English UI (i18n)** — done (commit 00871fe). — a sub-agent was implementing `rog_control/i18n.py` (Turkish strings as keys, EN catalogue, `ui/language` setting auto|en|tr, Settings → Language), English screenshots in `docs/screenshots/` and Turkish in `docs/screenshots/tr/`, README updates. Verify: whole suite passes; the "no Turkish text in English mode" test exists; look at EN screenshots.
-- [x] **App identity + new logo** — done: setDesktopFileName, bundled icons in `rog_control/ui/icons/`, installer installs hicolor PNGs. Owner must reinstall + restart the service to see it. — window shows as "python3" with no icon on GNOME/Wayland.
-  - Logo source files are ready in `assets/`: `assets/logo.png` (full logo + wordmark, for README), `assets/rog-control.png` (512 px app icon), `assets/icons/rog-control-{16..512}.png`. The old `assets/icon.svg` is obsolete.
-  - Code: in `rog_control/app.py` call `QGuiApplication.setDesktopFileName("rog-control")` (Wayland app_id = desktop file name, so GNOME picks up the name + icon), `setApplicationDisplayName("ROG Control")`, set the window icon from the PNG sizes (QIcon with all sizes); use it in the title bar (`ui/windows/_base.py`) and as the tray fallback icon (`ui/windows/tray.py`) instead of the old SVG.
-  - `install.sh`: install PNGs to `~/.local/share/icons/hicolor/<s>x<s>/apps/rog-control.png` (drop the scalable SVG), keep `Icon=rog-control`, add `StartupWMClass=rog-control` to the desktop entry; uninstall removes them.
+- [x] **English UI (i18n)** — done (commit 00871fe). — a sub-agent was implementing `alaz/i18n.py` (Turkish strings as keys, EN catalogue, `ui/language` setting auto|en|tr, Settings → Language), English screenshots in `docs/screenshots/` and Turkish in `docs/screenshots/tr/`, README updates. Verify: whole suite passes; the "no Turkish text in English mode" test exists; look at EN screenshots.
+- [x] **App identity + new logo** — done: setDesktopFileName, bundled icons in `alaz/ui/icons/`, installer installs hicolor PNGs. Owner must reinstall + restart the service to see it. — window shows as "python3" with no icon on GNOME/Wayland.
+  - Logo source files are ready in `assets/`: `assets/logo.png` (full logo + wordmark, for README), `assets/alaz.png` (512 px app icon), `assets/icons/alaz-{16..512}.png`. The old `assets/icon.svg` is obsolete.
+  - Code: in `alaz/app.py` call `QGuiApplication.setDesktopFileName("alaz")` (Wayland app_id = desktop file name, so GNOME picks up the name + icon), `setApplicationDisplayName("Alaz")`, set the window icon from the PNG sizes (QIcon with all sizes); use it in the title bar (`ui/windows/_base.py`) and as the tray fallback icon (`ui/windows/tray.py`) instead of the old SVG.
+  - `install.sh`: install PNGs to `~/.local/share/icons/hicolor/<s>x<s>/apps/alaz.png` (drop the scalable SVG), keep `Icon=alaz`, add `StartupWMClass=alaz` to the desktop entry; uninstall removes them.
   - README.md / README.tr.md: show `assets/logo.png` at the top.
-  - Verify: tests; after the owner reinstalls + restarts the service, the dock/alt-tab shows "ROG Control" with the logo.
-- [x] **CONTRIBUTING.md + issue templates** — done. (`.github/ISSUE_TEMPLATE/bug_report.yml`) asking for: model, CPU (Intel/AMD), distro/kernel, `asusctl -s`, `supergfxctl -s/-g`, `journalctl --user -u rog-control -b`. A friend with an AMD ROG laptop may open PRs.
+  - Verify: tests; after the owner reinstalls + restarts the service, the dock/alt-tab shows "Alaz" with the logo.
+- [x] **CONTRIBUTING.md + issue templates** — done. (`.github/ISSUE_TEMPLATE/bug_report.yml`) asking for: model, CPU (Intel/AMD), distro/kernel, `asusctl -s`, `supergfxctl -s/-g`, `journalctl --user -u alaz -b`. A friend with an AMD ROG laptop may open PRs.
 - [x] checkout@v5 bumped. Push only when the owner asks; bump `actions/checkout@v4` → `@v5` in `.github/workflows/tests.yml` (Node 20 deprecation warning).
 
 ## 1. CPU limiting (deferred by the owner — ask before starting)
