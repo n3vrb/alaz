@@ -125,6 +125,9 @@ def main() -> int:
     snap(app, MiniWindow(st, ctl), out / "mini.png")
 
     tray = Tray(st, ctl, settings)
+    # feed one snapshot so the header + live power line are filled (on battery, measured-like value)
+    st.set_sensors(fake_sensors(battery_status="Discharging", on_ac=False, battery_power_w=12.4,
+                                system_power_w=13.6))
     tray.menu.adjustSize()
     tray.menu.grab().save(str(out / "tray_menu.png"))
     print("saved", out / "tray_menu.png")
