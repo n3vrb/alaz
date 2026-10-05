@@ -481,11 +481,30 @@ class Controller(QObject):
             # the user explicitly enabled auto and is still waiting for a first on_ac value.
             if self._auto_refresh and (self._auto_pending or (prev is not None and prev != self._on_ac)):
                 self._request_auto_refresh()
+            if prev is None and not self._on_ac:
+                self._maybe_apply_battery_profile()
         # sensors may refine the GPU power string
         cur = self.state.gfx.power
         gs = getattr(snap, "gpu_state", "unknown")
         if gs != "unknown" and gs != cur:
             self._rebuild_gfx()
+
+    def _maybe_apply_battery_profile(self) -> None:
+        """Started on battery: apply asusd's battery profile once.
+
+        asusd only switches ThrottleThermalPolicy on an AC<->battery TRANSITION, so after booting
+        (or logging in) on battery the laptop stays in whatever profile it had — measured ~3 W more
+        in Balanced than in Quiet. This is the one deliberate startup write, and only when the user
+        enabled asusd's "change profile on battery" setting; manual changes later are left alone.
+        """
+        plat = self.state.platform
+        if not plat.get("ChangeThrottlePolicyOnBattery"):
+            return
+        target, current = plat.get("ThrottlePolicyOnBattery"), plat.get("ThrottleThermalPolicy")
+        if target is None or current is None or int(target) == int(current):
+            return
+        log.info("started on battery: applying battery profile %s (was %s)", target, current)
+        self._pulse("perf", lambda: self.asusd.set_platform("ThrottleThermalPolicy", int(target)))
 
     # ----------------------------------------------------- simple platform writes
     def set_panel_od(self, on: bool) -> None:

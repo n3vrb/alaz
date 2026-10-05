@@ -649,3 +649,37 @@ def test_bug7_set_custom_limits_clamps_and_reports(env):
     env.ctl.start()
     env.ctl.set_custom_limits(100, 80, 90)
     assert env.ctl.custom_limits() == (100, 100, 100)
+
+
+# --------------------------------------------- battery profile at startup (power fix)
+def _platform(env, **props):
+    for k, v in props.items():
+        env.asusd.platformChanged.emit(k, v)
+
+
+def test_started_on_battery_applies_battery_profile_once(tmp_path):
+    e = Env(tmp_path, policy=Profile.BALANCED)
+    e.ctl.start()
+    _platform(e, ThrottleThermalPolicy=int(Profile.BALANCED), ThrottlePolicyOnBattery=int(Profile.QUIET),
+              ChangeThrottlePolicyOnBattery=True)
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))
+    assert ("ThrottleThermalPolicy", int(Profile.QUIET)) in e.asusd.sets
+    n = len(e.asusd.sets)
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))      # later snapshots: no more writes
+    _platform(e, ThrottleThermalPolicy=int(Profile.PERFORMANCE))  # user picks Turbo manually
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))
+    assert len(e.asusd.sets) == n
+
+
+@pytest.mark.parametrize("on_ac,change,cur", [
+    (True, True, Profile.BALANCED),     # started on AC: nothing
+    (False, False, Profile.BALANCED),   # auto-switch disabled by the user: nothing
+    (False, True, Profile.QUIET),       # already in the battery profile: nothing
+])
+def test_battery_profile_not_applied(tmp_path, on_ac, change, cur):
+    e = Env(tmp_path, policy=cur)
+    e.ctl.start()
+    _platform(e, ThrottleThermalPolicy=int(cur), ThrottlePolicyOnBattery=int(Profile.QUIET),
+              ChangeThrottlePolicyOnBattery=change)
+    e.sensors.updated.emit(SensorSnapshot(on_ac=on_ac))
+    assert not any(k == "ThrottleThermalPolicy" for k, _ in e.asusd.sets)
