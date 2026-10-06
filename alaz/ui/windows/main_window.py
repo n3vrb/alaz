@@ -52,6 +52,7 @@ class MainWindow(FramelessWindow):
         state.perfModeChanged.connect(lambda _m: self._refresh_perf())
         state.sensorsChanged.connect(self._refresh_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
+        state.gfxChanged.connect(lambda _v: self._refresh_logo())
         state.displayChanged.connect(lambda _v: self._refresh_display())
         state.batteryLimitChanged.connect(lambda _v: self._refresh_battery_limit())
         state.platformChanged.connect(self._on_platform)
@@ -64,7 +65,8 @@ class MainWindow(FramelessWindow):
         self._logo = QLabel()
         # QIcon.pixmap() already applies the screen's device pixel ratio in Qt 6;
         # scaling it again made the logo 2x too big and clipped on HiDPI screens.
-        self._logo.setPixmap(app_icon(self.state.perf_mode).pixmap(22, 22))
+        self._logo.setPixmap(app_icon(self.state.gfx.active).pixmap(22, 22))
+        self._logo_mode = self.state.gfx.active
         self._logo.setScaledContents(True)
         self._logo.setFixedSize(22, 22)
         tb.addWidget(self._logo)
@@ -213,12 +215,18 @@ class MainWindow(FramelessWindow):
         self.apply_enabled()
 
     def accent_applied(self, accent: str) -> None:
-        from alaz.ui.app_icon import app_icon
-        self._logo.setPixmap(app_icon(self.state.perf_mode).pixmap(22, 22))   # logo colour follows the mode
         self._refresh_light()
         self.pill.set(PERF_LABEL.get(self.state.perf_mode, ""), accent)
         self.gpu_header.set_accent(accent)
         self.pending.set_accent(self._pending_color())
+
+    def _refresh_logo(self) -> None:
+        """Title-bar logo colour follows the active GPU mode."""
+        from alaz.ui.app_icon import app_icon
+        m = self.state.gfx.active
+        if m != self._logo_mode:
+            self._logo_mode = m
+            self._logo.setPixmap(app_icon(m).pixmap(22, 22))
 
     def _refresh_perf(self) -> None:
         m = self.state.perf_mode

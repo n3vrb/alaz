@@ -1,6 +1,6 @@
 """Render the Alaz logo from its vector definition (tools/alaz_logo_shape.py).
 
-Outputs: app icons (all sizes) for assets/icons and alaz/ui/icons, per-perf-mode variants
+Outputs: app icons (all sizes) for assets/icons and alaz/ui/icons, per-GPU-mode variants
 (alaz-<mode>-<size>.png, alaz/ui/icons only), assets/alaz.png (512 px icon), assets/logo.png (emblem + "Alaz" wordmark, for the README).  Usage: python3 tools/make_logo.py
 """
 import os
@@ -87,10 +87,10 @@ def main() -> None:
         d.mkdir(parents=True, exist_ok=True)
         for s in SIZES:
             icon(s).save(str(d / f"alaz-{s}.png"))
-    # mode variants follow the active perf mode in the running app (title bar, tray, window icon);
+    # mode variants follow the active GPU mode in the running app (title bar, tray, window icon);
     # the desktop/launcher icon stays the base colour
     for mode, col in MODE_COLORS.items():
-        if mode == "quiet":
+        if mode == "eco":
             continue
         for s in SIZES:
             icon(s, QColor(col)).save(str(ROOT / "alaz" / "ui" / "icons" / f"alaz-{mode}-{s}.png"))

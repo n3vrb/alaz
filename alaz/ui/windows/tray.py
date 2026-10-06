@@ -23,7 +23,7 @@ BAT_STATUS = {"Charging": "Şarj oluyor", "Discharging": "Boşalıyor", "Full": 
 
 
 def make_icon(accent: str, mode: str | None = None) -> QIcon:
-    """Tray icon when no watts are shown: the application logo in the perf mode's colour."""
+    """Tray icon when no watts are shown: the application logo in the active GPU mode's colour."""
     from alaz.ui.app_icon import app_icon
     icon = app_icon(mode)
     if not icon.isNull():
@@ -103,7 +103,8 @@ class Tray(QObject):
         self._icon_watts: int | None = None   # integer currently drawn in the tray icon
         self._icon_at = -1e9
         self.icon_updates = 0
-        self.icon = QSystemTrayIcon(make_icon(state.accent, state.perf_mode), self)
+        self._logo_mode = state.gfx.active
+        self.icon = QSystemTrayIcon(make_icon(state.accent, state.gfx.active), self)
         self.menu = QMenu()
         self.menu.setStyleSheet(
             f"QMenu {{ background:{theme.PANEL}; border:1px solid {theme.BORDER}; border-radius:10px; padding:6px; }}"
@@ -201,6 +202,10 @@ class Tray(QObject):
         g = self.state.gfx.active
         for k, a in self.gpu_actions.items():
             a.setChecked(k == g)
+        if g != self._logo_mode:              # logo colour follows the active GPU mode
+            self._logo_mode = g
+            if self._icon_watts is None:
+                self.icon.setIcon(make_icon(self.state.accent, g))
 
     def _refresh_light(self) -> None:
         br = self.state.aura.brightness
@@ -209,7 +214,7 @@ class Tray(QObject):
 
     def _on_accent(self, accent: str) -> None:
         if self._icon_watts is None:
-            self.icon.setIcon(make_icon(accent, self.state.perf_mode))
+            self.icon.setIcon(make_icon(accent, self.state.gfx.active))
 
     def _on_sensors(self, s) -> None:
         if s is not None:
@@ -229,7 +234,7 @@ class Tray(QObject):
         now = self._clock()
         if want is None:
             self._icon_watts = None
-            self.icon.setIcon(make_icon(self.state.accent, self.state.perf_mode))
+            self.icon.setIcon(make_icon(self.state.accent, self.state.gfx.active))
         elif now - self._icon_at >= 1.0:
             self._icon_watts, self._icon_at = want, now
             self.icon.setIcon(make_watts_icon(want))

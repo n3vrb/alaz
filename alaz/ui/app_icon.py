@@ -1,4 +1,4 @@
-"""The Alaz application icon (window, title bar, tray fallback), coloured per perf mode."""
+"""The Alaz application icon (window, title bar, tray fallback), coloured per GPU mode."""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -8,8 +8,8 @@ from PyQt6.QtGui import QIcon, QPixmap
 
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
-# perf modes with their own logo colour (tools/make_logo.py); "quiet" and unknown use the base logo
-MODE_VARIANTS = ("balanced", "turbo", "custom")
+# active GPU modes with their own logo colour (tools/make_logo.py); "eco" and unknown/None use the base logo
+MODE_VARIANTS = ("standard", "ultimate", "optimize")
 
 
 def _load(prefix: str) -> QIcon:

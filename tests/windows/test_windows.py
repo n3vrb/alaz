@@ -80,23 +80,29 @@ def _emblem_rgb(img):
     return c.red(), c.green(), c.blue()
 
 
-def test_logo_colour_follows_perf_mode(env):
+def test_logo_colour_follows_gpu_mode(env, monkeypatch):
     from alaz.ui.app_icon import app_icon
-    from alaz.ui.windows.tray import make_icon
     st, ctl, settings = env
-    want = {"quiet": (0x1A, 0xD2, 0xC4), "balanced": (0x2F, 0x7B, 0xFF),
-            "turbo": (0xE8, 0x32, 0x3A), "custom": (0xF2, 0xA9, 0x3B)}
+    want = {"eco": (0x1A, 0xD2, 0xC4), "standard": (0x2F, 0x7B, 0xFF),
+            "ultimate": (0xE8, 0x32, 0x3A), "optimize": (0xF2, 0xA9, 0x3B)}
     for mode, rgb in want.items():
         got = _emblem_rgb(app_icon(mode).pixmap(64, 64).toImage())
         assert all(abs(a - b) <= 6 for a, b in zip(got, rgb)), (mode, got)
-    base = _emblem_rgb(app_icon("quiet").pixmap(64, 64).toImage())
+    base = _emblem_rgb(app_icon("eco").pixmap(64, 64).toImage())
     assert _emblem_rgb(app_icon(None).pixmap(64, 64).toImage()) == base
     assert _emblem_rgb(app_icon("nonsense").pixmap(64, 64).toImage()) == base   # unknown mode -> base logo
-    w = MainWindow(st, ctl, settings)                      # fixture starts in balanced
-    assert _emblem_rgb(w._logo.pixmap().toImage())[2] > 200    # blue
-    st.set_perf_mode("turbo")
-    assert _emblem_rgb(w._logo.pixmap().toImage())[0] > 200    # red
-    assert not make_icon(st.accent, "turbo").isNull()
+    st.set_gfx(active="standard")
+    w = MainWindow(st, ctl, settings)
+    tray = Tray(st, ctl, settings)
+    tray_rgb = lambda: _emblem_rgb(tray.icon.icon().pixmap(64, 64).toImage())
+    assert _emblem_rgb(w._logo.pixmap().toImage())[2] > 200 and tray_rgb()[2] > 200    # blue
+    st.set_perf_mode("turbo")                                                          # perf mode: no effect
+    assert _emblem_rgb(w._logo.pixmap().toImage())[2] > 200 and tray_rgb()[2] > 200
+    st.set_gfx(active="ultimate")
+    assert _emblem_rgb(w._logo.pixmap().toImage())[0] > 200 and tray_rgb()[0] > 200    # red
+    st.set_gfx(active="eco")
+    teal = lambda rgb: rgb[1] > 150 and rgb[2] > 150 and rgb[0] < 60
+    assert teal(_emblem_rgb(w._logo.pixmap().toImage())) and teal(tray_rgb())
 
 
 def test_gfx_pending_card_and_banner(env, monkeypatch):
