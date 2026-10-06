@@ -64,7 +64,7 @@ class MainWindow(FramelessWindow):
         self._logo = QLabel()
         # QIcon.pixmap() already applies the screen's device pixel ratio in Qt 6;
         # scaling it again made the logo 2x too big and clipped on HiDPI screens.
-        self._logo.setPixmap(app_icon().pixmap(22, 22))
+        self._logo.setPixmap(app_icon(self.state.perf_mode).pixmap(22, 22))
         self._logo.setScaledContents(True)
         self._logo.setFixedSize(22, 22)
         tb.addWidget(self._logo)
@@ -213,6 +213,8 @@ class MainWindow(FramelessWindow):
         self.apply_enabled()
 
     def accent_applied(self, accent: str) -> None:
+        from alaz.ui.app_icon import app_icon
+        self._logo.setPixmap(app_icon(self.state.perf_mode).pixmap(22, 22))   # logo colour follows the mode
         self._refresh_light()
         self.pill.set(PERF_LABEL.get(self.state.perf_mode, ""), accent)
         self.gpu_header.set_accent(accent)

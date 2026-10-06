@@ -74,6 +74,31 @@ def test_accent_propagates(env):
         assert child.accent == "#F2A93B"
 
 
+def _emblem_rgb(img):
+    """Colour at the emblem's stem (centre column, just above the middle)."""
+    c = img.pixelColor(img.width() // 2, int(img.height() * 0.42))
+    return c.red(), c.green(), c.blue()
+
+
+def test_logo_colour_follows_perf_mode(env):
+    from alaz.ui.app_icon import app_icon
+    from alaz.ui.windows.tray import make_icon
+    st, ctl, settings = env
+    want = {"quiet": (0x1A, 0xD2, 0xC4), "balanced": (0x2F, 0x7B, 0xFF),
+            "turbo": (0xE8, 0x32, 0x3A), "custom": (0xF2, 0xA9, 0x3B)}
+    for mode, rgb in want.items():
+        got = _emblem_rgb(app_icon(mode).pixmap(64, 64).toImage())
+        assert all(abs(a - b) <= 6 for a, b in zip(got, rgb)), (mode, got)
+    base = _emblem_rgb(app_icon("quiet").pixmap(64, 64).toImage())
+    assert _emblem_rgb(app_icon(None).pixmap(64, 64).toImage()) == base
+    assert _emblem_rgb(app_icon("nonsense").pixmap(64, 64).toImage()) == base   # unknown mode -> base logo
+    w = MainWindow(st, ctl, settings)                      # fixture starts in balanced
+    assert _emblem_rgb(w._logo.pixmap().toImage())[2] > 200    # blue
+    st.set_perf_mode("turbo")
+    assert _emblem_rgb(w._logo.pixmap().toImage())[0] > 200    # red
+    assert not make_icon(st.accent, "turbo").isNull()
+
+
 def test_gfx_pending_card_and_banner(env, monkeypatch):
     st, ctl, settings = env
     w = MainWindow(st, ctl, settings)

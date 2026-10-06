@@ -5,3 +5,5 @@ def outline():
     left = [(1254 - x, y) for x, y in reversed(RIGHT[1:-1])]
     return RIGHT + left
 COLOR = "#1AD2C4"
+# per perf-mode emblem colour; "quiet" is the base logo (COLOR)
+MODE_COLORS = {"quiet": COLOR, "balanced": "#2F7BFF", "turbo": "#E8323A", "custom": "#F2A93B"}

@@ -269,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     state, controller, _keep = built
     theme.apply(app, state.accent)
+    app.setWindowIcon(app_icon(state.perf_mode))
+    state.accentChanged.connect(lambda _a: app.setWindowIcon(app_icon(state.perf_mode)))
     shell = Shell(state, controller, settings)
     guard.activated.connect(shell.show_main)
     controller.start()
