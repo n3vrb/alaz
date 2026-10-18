@@ -478,9 +478,9 @@ class Controller(QObject):
         on_ac = getattr(snap, "on_ac", None)
         if on_ac is not None:
             prev, self._on_ac = self._on_ac, bool(on_ac)
-            # The first snapshot only records on_ac (no write at startup); act on a later TRANSITION, or when
-            # the user explicitly enabled auto and is still waiting for a first on_ac value.
-            if self._auto_refresh and (self._auto_pending or (prev is not None and prev != self._on_ac)):
+            # Auto applies once on the first snapshot (booting on battery must still drop to 60 Hz), then on
+            # every AC<->battery TRANSITION; repeated snapshots with the same value don't write.
+            if self._auto_refresh and (self._auto_pending or prev != self._on_ac):
                 self._request_auto_refresh()
             if prev is None and not self._on_ac:
                 self._maybe_apply_battery_profile()

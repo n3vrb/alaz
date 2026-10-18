@@ -603,20 +603,35 @@ def test_bug4c_asusd_error_clears_custom_flag(env):
     assert env.state.perf_mode == "turbo"        # policy is PERFORMANCE, custom no longer claimed
 
 
-def test_bug5_persisted_auto_refresh_does_not_write_at_startup(tmp_path):
+def test_persisted_auto_refresh_applies_at_startup_on_battery(tmp_path):
     e = Env(tmp_path, policy=Profile.BALANCED)
     e.settings.setValue("display/auto_refresh", True)
     e = Env(tmp_path, policy=Profile.BALANCED)
+    e.display.st = DS(current_hz=240)
     e.ctl.start()
-    e.sensors.updated.emit(SensorSnapshot(on_ac=True))     # first snapshot only records
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))    # booted on battery -> 60 once
+    assert e.display.sets == [60]
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))
+    assert e.display.sets == [60]                          # no repeat
+    e.sensors.updated.emit(SensorSnapshot(on_ac=True))     # real transition
+    assert e.display.sets == [60, 240]
+
+
+def test_persisted_auto_refresh_at_startup_skips_when_already_current(tmp_path):
+    e = Env(tmp_path, policy=Profile.BALANCED)
+    e.settings.setValue("display/auto_refresh", True)
+    e = Env(tmp_path, policy=Profile.BALANCED)
+    e.ctl.start()                                          # DS current 60
+    e.sensors.updated.emit(SensorSnapshot(on_ac=False))
     assert e.display.sets == []
-    e.sensors.updated.emit(SensorSnapshot(on_ac=True))
-    assert e.display.sets == []
-    e.sensors.updated.emit(SensorSnapshot(on_ac=False))    # real transition
-    assert e.display.sets == [60] or e.display.sets == []  # 60 is current in DS -> nothing to write
-    e.display.st = DS(current_hz=144)
-    e.sensors.updated.emit(SensorSnapshot(on_ac=True))
-    assert e.display.sets[-1] == 240
+
+
+def test_auto_refresh_off_never_writes_at_startup(env):
+    env.display.st = DS(current_hz=240)
+    env.ctl.start()
+    env.sensors.updated.emit(SensorSnapshot(on_ac=False))
+    env.sensors.updated.emit(SensorSnapshot(on_ac=True))
+    assert env.display.sets == []
 
 
 def test_bug5_auto_uses_fresh_display_state(env, monkeypatch):
