@@ -1,0 +1,6 @@
+# Alaz: give the logged-in user (uaccess) access to the vendor CONTROL interface of ASUS ROG peripherals only.
+# Input interfaces (keys, pointer) stay root-only. Must sort before 73-seat-late.rules for uaccess to apply.
+# ROG OMNI RECEIVER (Harpe Ace Mini): USB interface 2 (vendor report IDs 1/2/3).
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{bInterfaceNumber}=="02", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1ace", TAG+="uaccess"
+# ROG PELTA, 2.4 GHz dongle (1b84) and USB-C cable (1b82): USB interface 3 (vendor report 0xCC).
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{bInterfaceNumber}=="03", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1b84|1b82", TAG+="uaccess"

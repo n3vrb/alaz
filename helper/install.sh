@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the Alaz GPU helper, polkit policy and the RAPL psys udev rule. Run: sudo helper/install.sh
+# Installs the Alaz GPU helper, polkit policy, the RAPL psys udev rule and the peripherals udev rule. Run: sudo helper/install.sh
 set -eu
 if [ "$(id -u)" -ne 0 ]; then
     echo "Root gerekli / run as root: sudo $0" >&2
@@ -15,9 +15,11 @@ install -m 0755 -o root -g root "$here/alaz-gfx-helper" /usr/local/libexec/alaz-
 install -m 0644 -o root -g root "$here/org.alaz.gfx.policy" /usr/share/polkit-1/actions/org.alaz.gfx.policy
 install -d -m 0755 -o root -g root /etc/udev/rules.d
 install -m 0644 -o root -g root "$here/90-alaz-rapl.rules" /etc/udev/rules.d/90-alaz-rapl.rules
+install -m 0644 -o root -g root "$here/70-alaz-peripherals.rules" /etc/udev/rules.d/70-alaz-peripherals.rules
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules || true
     udevadm trigger --subsystem-match=powercap --action=change || true
+    udevadm trigger --subsystem-match=hidraw --action=change || true
     udevadm settle --timeout=5 || true
 fi
 echo "Kuruldu / installed."

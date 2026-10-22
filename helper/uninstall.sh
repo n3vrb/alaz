@@ -1,17 +1,18 @@
 #!/bin/sh
-# Removes the Alaz GPU helper, polkit policy and the RAPL psys udev rule. Run: sudo helper/uninstall.sh
+# Removes the Alaz GPU helper, polkit policy, the RAPL psys udev rule and the peripherals udev rule. Run: sudo helper/uninstall.sh
 set -eu
 if [ "$(id -u)" -ne 0 ]; then
     echo "Root gerekli / run as root: sudo $0" >&2
     exit 1
 fi
 rm -f /usr/local/libexec/alaz-gfx-helper /usr/share/polkit-1/actions/org.alaz.gfx.policy
-rm -f /etc/udev/rules.d/90-alaz-rapl.rules
+rm -f /etc/udev/rules.d/90-alaz-rapl.rules /etc/udev/rules.d/70-alaz-peripherals.rules
 # former name (ROG Control)
 rm -f /usr/local/libexec/rog-control-gfx-helper /usr/share/polkit-1/actions/org.rogcontrol.gfx.policy
 rm -f /etc/udev/rules.d/90-rog-control-rapl.rules
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=hidraw --action=change || true
 fi
 # restore the stock root-only mode on the psys counter only
 for d in /sys/class/powercap/intel-rapl:*; do
