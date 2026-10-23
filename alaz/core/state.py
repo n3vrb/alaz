@@ -43,6 +43,20 @@ class AuraView:
     color: tuple[int, int, int] | None = None
 
 
+AURA_EFFECTS = ("static", "breathing", "cycle")
+AURA_TARGETS = ("keyboard", "mouse", "headset")
+
+
+@dataclass
+class AuraSyncView:
+    """One colour/effect applied to every selected device (keyboard, mouse, headset)."""
+    enabled: bool = False
+    effect: str = "static"                       # "static" | "breathing" | "cycle"
+    color: tuple[int, int, int] = (76, 141, 255)
+    brightness: int = 100                        # 0..100
+    targets: set = field(default_factory=lambda: set(AURA_TARGETS))
+
+
 class AppState(QObject):
     perfModeChanged = pyqtSignal(str)
     accentChanged = pyqtSignal(str)
@@ -53,6 +67,8 @@ class AppState(QObject):
     platformChanged = pyqtSignal(str, object)
     fanCurvesChanged = pyqtSignal(str, object)
     auraChanged = pyqtSignal(object)
+    peripheralsChanged = pyqtSignal(str, object)     # "mouse" | "headset" | "monitor", backend state object
+    auraSyncChanged = pyqtSignal(object)             # AuraSyncView
     busyChanged = pyqtSignal(str, bool)
     message = pyqtSignal(str, str)
 
@@ -66,6 +82,8 @@ class AppState(QObject):
         self._platform: dict[str, Any] = {}
         self._aura = AuraView()
         self._fan_curves: dict[str, list] = {}
+        self._peripherals: dict[str, Any] = {}
+        self._aura_sync = AuraSyncView()
 
     # ---------------------------------------------------------- read access
     @property
@@ -99,6 +117,14 @@ class AppState(QObject):
     @property
     def aura(self) -> AuraView:
         return self._aura
+
+    @property
+    def aura_sync(self) -> AuraSyncView:
+        return self._aura_sync
+
+    def peripheral(self, kind: str) -> Any:
+        """Last known MouseState / HeadsetState / MonitorState, or None before the first read."""
+        return self._peripherals.get(kind)
 
     @property
     def fan_curves(self) -> dict[str, list]:
@@ -148,6 +174,16 @@ class AppState(QObject):
             return
         self._aura = view
         self.auraChanged.emit(view)
+
+    def set_peripheral(self, kind: str, st: Any) -> None:
+        self._peripherals[kind] = st
+        self.peripheralsChanged.emit(kind, st)
+
+    def set_aura_sync(self, view: AuraSyncView) -> None:
+        if view == self._aura_sync:
+            return
+        self._aura_sync = view
+        self.auraSyncChanged.emit(view)
 
     def set_fan_curves(self, mode: str, curves: list) -> None:
         self._fan_curves[mode] = list(curves)

@@ -101,6 +101,7 @@ class Shell(QObject):
         self._watch_timer: QTimer | None = None
         self._polls = 0
         self._was_available = False
+        from alaz.ui.windows.devices_window import DevicesWindow
         from alaz.ui.windows.fans_window import FansWindow
         from alaz.ui.windows.keyboard_window import KeyboardWindow
         from alaz.ui.windows.main_window import MainWindow
@@ -113,14 +114,16 @@ class Shell(QObject):
         self.main = MainWindow(state, controller, settings, tray_available=self._tray_ok)
         self.fans = FansWindow(state, controller)
         self.keyboard = KeyboardWindow(state, controller)
+        self.devices = DevicesWindow(state, controller)
         self.settings_win = SettingsWindow(state, controller, settings)
         self.mini = MiniWindow(state, controller)
 
         self.main.openFans.connect(lambda: self._open_sub(self.fans))
         self.main.openKeyboard.connect(lambda: self._open_sub(self.keyboard))
+        self.main.openDevices.connect(lambda: self._open_sub(self.devices))
         self.main.openSettings.connect(lambda: self._open_sub(self.settings_win))
         self.main.openMini.connect(self.show_mini)
-        for w in (self.fans, self.keyboard, self.settings_win):
+        for w in (self.fans, self.keyboard, self.devices, self.settings_win):
             w.backRequested.connect(self.show_main)
         self.mini.expandRequested.connect(self.show_main)
         self.tray.openMainRequested.connect(self.show_main)
@@ -229,14 +232,18 @@ def _build_real(settings: QSettings):
         log.exception("alaz.core.controller could not be imported; use --fake for a demo")
         return None
     from alaz.backend.asusd import AsusdClient
+    from alaz.backend.ddc import DdcClient
     from alaz.backend.display import DisplayClient
     from alaz.backend.gfx import GfxClient
+    from alaz.backend.peripherals.headset import HeadsetClient
+    from alaz.backend.peripherals.mouse import MouseClient
     from alaz.backend.sensors import SensorReader
 
     state = AppState()
     asusd, gfx, sensors, display = AsusdClient(), GfxClient(), SensorReader(), DisplayClient()
-    ctl = Controller(state, asusd, gfx, sensors, display, settings)
-    return state, ctl, [asusd, gfx, sensors, display]
+    mouse, headset, ddc = MouseClient(), HeadsetClient(), DdcClient()
+    ctl = Controller(state, asusd, gfx, sensors, display, settings, mouse=mouse, headset=headset, ddc=ddc)
+    return state, ctl, [asusd, gfx, sensors, display, mouse, headset, ddc]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -286,5 +293,9 @@ def main(argv: list[str] | None = None) -> int:
         stop = getattr(obj, "stop_watching", None)
         if callable(stop):
             stop()
+    for obj in _keep:       # HID clients: stop timers, let the worker finish, close the hidraw nodes
+        shutdown = getattr(obj, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
     guard.close()
     return code

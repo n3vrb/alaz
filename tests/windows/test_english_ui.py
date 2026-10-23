@@ -178,7 +178,8 @@ def test_tray_english():
         texts = [a.text() for a in tray.menu.actions()] + [tray.icon.toolTip()]
         assert_english(texts, "tray")
     texts = [a.text() for a in tray.menu.actions() if a.text() and a.isVisible()]
-    head = ["Alaz", tray.info.text()] + ([tray.power.text()] if tray.power.isVisible() else [])
+    head = ["Alaz", tray.info.text()] + ([tray.power.text()] if tray.power.isVisible() else []) + (
+        [tray.periph.text()] if tray.periph.isVisible() else [])
     assert texts[:len(head) + 1] == head + ["PERFORMANCE"]
     if tray.power.isVisible():
         assert tray.power.text().startswith("Power: ")

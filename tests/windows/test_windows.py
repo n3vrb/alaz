@@ -37,11 +37,11 @@ def test_main_window_fits_without_scroll(env):
     w = MainWindow(st, ctl, settings)
     w.show()
     pump()
-    assert (w.width(), w.height()) == (480, 920)
-    assert w.layout().sizeHint().height() <= 920
+    assert (w.width(), w.height()) == (480, 960)
+    assert w.layout().sizeHint().height() <= 960
     st.set_gfx(boot="eco", pending="eco", active="standard")  # tallest state
     pump()
-    assert w.layout().sizeHint().height() <= 920
+    assert w.layout().sizeHint().height() <= 960
 
 
 def test_perf_click_and_state_signals(env):

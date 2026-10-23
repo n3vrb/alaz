@@ -9,8 +9,12 @@ from dataclasses import dataclass, field
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from alaz.backend.ddc import MonitorState
+from alaz.backend.peripherals.headset import HeadsetState
+from alaz.backend.peripherals.mouse import MouseState
 from alaz.backend.sensors import SensorSnapshot
 from alaz.backend.types import FanCurve
+from alaz.core.state import AuraSyncView
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +61,31 @@ class AuraView:
     color: tuple[int, int, int] | None = (76, 141, 255)
 
 
+def fake_mouse(**kw) -> MouseState:
+    base = dict(present=True, permission=True, asleep=False, serial="S7MPKR039858", battery_pct=66, charging=False,
+                sleep_code=3, low_battery_pct=20, profile=0, dpi_stage=2, dpi_stages=[400, 800, 1600, 3200],
+                dpi_colors=[(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)], polling_hz=1000, debounce_ms=12,
+                angle_snapping=False, led_mode=2, led_brightness=50, led_rgb=(0, 255, 0))
+    base.update(kw)
+    return MouseState(**base)
+
+
+def fake_headset(**kw) -> HeadsetState:
+    base = dict(present=True, permission=True, connected=True, firmware="4.0.5.0", battery_pct=87, charging=False,
+                light_effect=1, light_brightness=50, light_rgb=(0xEA, 0xB2, 0x15), software_led=False)
+    base.update(kw)
+    return HeadsetState(**base)
+
+
+def fake_monitor(**kw) -> MonitorState:
+    base = dict(present=True, bus=13, model="XG27UCDMG", serial="T7LMQS012345",
+                values={"brightness": 30, "contrast": 80, "color_temp": 0x0B, "gamevisual": 0x02, "shadow_boost": 0,
+                        "blue_light": 0, "hdr": 0, "screen_move": 2, "pixel_clean_reminder": 8, "input": 0x1A},
+                locked=set(), maxima={"brightness": 100, "contrast": 100})
+    base.update(kw)
+    return MonitorState(**base)
+
+
 def fake_curves(mode: str) -> list[FanCurve]:
     return [FanCurve(fan, tuple(t), tuple(p), True) for fan, (t, p) in RAW[mode].items()]
 
@@ -81,6 +110,8 @@ class FakeState(QObject):
     platformChanged = pyqtSignal(str, object)
     fanCurvesChanged = pyqtSignal(str, object)
     auraChanged = pyqtSignal(object)
+    peripheralsChanged = pyqtSignal(str, object)
+    auraSyncChanged = pyqtSignal(object)
     busyChanged = pyqtSignal(str, bool)
     message = pyqtSignal(str, str)
 
@@ -95,6 +126,8 @@ class FakeState(QObject):
                           "NvTempTarget": 75, "ThrottleQuietEpp": 4, "ThrottleBalancedEpp": 3,
                           "ThrottlePerformanceEpp": 1, "PptPl1Spl": 60, "PptPl2Sppt": 90, "PptFppt": 110}
         self._aura = AuraView()
+        self._peripherals = {"mouse": fake_mouse(), "headset": fake_headset(), "monitor": fake_monitor()}
+        self._aura_sync = AuraSyncView(enabled=False, effect="static", color=(0xEA, 0xB2, 0x15), brightness=80)
 
     perf_mode = property(lambda s: s._perf)
     accent = property(lambda s: ACCENTS[s._perf])
@@ -104,6 +137,18 @@ class FakeState(QObject):
     battery_limit = property(lambda s: s._battery_limit)
     platform = property(lambda s: s._platform)
     aura = property(lambda s: s._aura)
+    aura_sync = property(lambda s: s._aura_sync)
+
+    def peripheral(self, kind: str):
+        return self._peripherals.get(kind)
+
+    def set_peripheral(self, kind: str, st) -> None:
+        self._peripherals[kind] = st
+        self.peripheralsChanged.emit(kind, st)
+
+    def set_aura_sync(self, view: AuraSyncView) -> None:
+        self._aura_sync = view
+        self.auraSyncChanged.emit(view)
 
     # mutation helpers (what the real controller/core would do)
     def set_perf_mode(self, mode: str) -> None:
@@ -254,3 +299,64 @@ class FakeController(QObject):
     def set_kbd_color(self, rgb) -> None:
         self._rec("set_kbd_color", tuple(rgb))
         self.state.set_aura(color=tuple(rgb))
+
+    # ---- peripherals (wave 2): update the fake device states the way the real backends would
+    def _mouse_patch(self, **kw) -> None:
+        import dataclasses
+        self.state.set_peripheral("mouse", dataclasses.replace(self.state.peripheral("mouse"), **kw))
+
+    def mouse_set_dpi(self, i: int, dpi: int) -> None:
+        self._rec("mouse_set_dpi", i, dpi)
+        stages = list(self.state.peripheral("mouse").dpi_stages or [400, 800, 1600, 3200])
+        stages[i] = dpi
+        self._mouse_patch(dpi_stages=stages)
+
+    def mouse_set_active_stage(self, stage: int) -> None:
+        self._rec("mouse_set_active_stage", stage)
+        self._mouse_patch(dpi_stage=stage)
+
+    def mouse_set_polling(self, hz: int) -> None:
+        self._rec("mouse_set_polling", hz)
+        self._mouse_patch(polling_hz=hz)
+
+    def mouse_set_debounce(self, ms: int) -> None:
+        self._rec("mouse_set_debounce", ms)
+        self._mouse_patch(debounce_ms=ms)
+
+    def mouse_set_angle_snapping(self, on: bool) -> None:
+        self._rec("mouse_set_angle_snapping", on)
+        self._mouse_patch(angle_snapping=on)
+
+    def mouse_set_sleep(self, code: int) -> None:
+        self._rec("mouse_set_sleep", code)
+        self._mouse_patch(sleep_code=code)
+
+    def mouse_set_led(self, mode: int, brightness: int, rgb) -> None:
+        self._rec("mouse_set_led", mode, brightness, tuple(rgb))
+        self._mouse_patch(led_mode=mode, led_brightness=brightness, led_rgb=tuple(rgb))
+
+    def headset_set_lighting(self, effect: int, brightness: int, rgb) -> None:
+        import dataclasses
+        self._rec("headset_set_lighting", effect, brightness, tuple(rgb))
+        self.state.set_peripheral("headset", dataclasses.replace(
+            self.state.peripheral("headset"), light_effect=effect, light_brightness=brightness,
+            light_rgb=tuple(rgb)))
+
+    def refresh_monitor(self) -> None:
+        self._rec("refresh_monitor")
+
+    def monitor_set(self, key: str, value: int) -> None:
+        import dataclasses
+        self._rec("monitor_set", key, value)
+        m = self.state.peripheral("monitor")
+        self.state.set_peripheral("monitor", dataclasses.replace(m, values={**m.values, key: value}))
+
+    def monitor_set_input(self, value: int) -> None:
+        import dataclasses
+        self._rec("monitor_set_input", value)
+        m = self.state.peripheral("monitor")
+        self.state.set_peripheral("monitor", dataclasses.replace(m, values={**m.values, "input": value}))
+
+    def aura_sync_set(self, view: AuraSyncView) -> None:
+        self._rec("aura_sync_set", view)
+        self.state.set_aura_sync(view)

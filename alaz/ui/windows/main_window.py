@@ -1,4 +1,4 @@
-"""MainWindow (docs/design/V2Main.dc.html): 480x920, no scrolling."""
+"""MainWindow (docs/design/V2Main.dc.html): 480x960, no scrolling."""
 from __future__ import annotations
 
 import logging
@@ -40,11 +40,12 @@ HZ_QUICK = (60, 120, 240)
 class MainWindow(FramelessWindow):
     openFans = pyqtSignal()
     openKeyboard = pyqtSignal()
+    openDevices = pyqtSignal()
     openSettings = pyqtSignal()
     openMini = pyqtSignal()
 
     def __init__(self, state, controller, settings=None, tray_available=None, parent: QWidget | None = None):
-        super().__init__(state, controller, "Alaz", 480, 920, parent=parent)
+        super().__init__(state, controller, "Alaz", 480, 960, parent=parent)
         self._settings = settings
         self._tray_available = tray_available or (lambda: False)
         self._build()
@@ -171,12 +172,16 @@ class MainWindow(FramelessWindow):
         lay.addLayout(self._section(self.bat_header, bp))
 
         lay.addStretch(1)
+        nav_box = QVBoxLayout()
+        nav_box.setSpacing(6)
+        nav_box.setContentsMargins(0, 0, 0, 14)
         nav = QHBoxLayout()
         nav.setSpacing(6)
-        nav.setContentsMargins(0, 0, 0, 14)
         self.btn_fans = NavButton("fan", tr("Fanlar & Güç"))
         self.btn_kbd = NavButton("keyboard", tr("Klavye"))
         self.btn_set = NavButton("settings", tr("Ayarlar"))
+        self.btn_dev = NavButton("monitor", tr("Cihazlar"))
+        self.btn_dev.clicked.connect(self.openDevices)
         self.btn_mini = NavButton("expand", "", tr("Mini moda geç"))
         self.btn_light = NavButton("kbd_light", "", tr("Klavye ışığı aç/kapat"))
         self.btn_light.clicked.connect(self.ctl.toggle_kbd_light)
@@ -190,7 +195,9 @@ class MainWindow(FramelessWindow):
         for b, stretch in ((self.btn_fans, 13), (self.btn_kbd, 10), (self.btn_light, 0),
                            (self.btn_set, 10), (self.btn_mini, 0)):
             nav.addWidget(b, stretch)
-        lay.addLayout(nav)
+        nav_box.addLayout(nav)
+        nav_box.addWidget(self.btn_dev)       # second row: no room for a fifth label next to the others
+        lay.addLayout(nav_box)
 
         self.track_accent(self.perf_header, self.perf_row, self.gpu_header, self.gpu_row, self.disp_header, self.od,
                           self.hz_seg, self.bat_header, self.bat_seg, self.bat_slider, self.sensor)

@@ -21,6 +21,7 @@ from alaz.ui import theme  # noqa: E402
 from alaz.ui.windows._fake import FakeController, FakeState, fake_curves, fake_sensors  # noqa: E402
 from alaz.ui.windows import dialogs  # noqa: E402
 from alaz.ui.windows.main_window import PERF_COLOR_GPU  # noqa: E402
+from alaz.ui.windows.devices_window import DevicesWindow  # noqa: E402
 from alaz.ui.windows.fans_window import FansWindow  # noqa: E402
 from alaz.ui.windows.keyboard_window import KeyboardWindow  # noqa: E402
 from alaz.ui.windows.main_window import MainWindow  # noqa: E402
@@ -121,6 +122,30 @@ def main() -> int:
     st, ctl = make("balanced")
     theme.apply(app, st.accent)
     snap(app, KeyboardWindow(st, ctl), out / "keyboard.png")
+    for tab in ("aura", "mouse", "headset", "monitor"):
+        st, ctl = make("balanced")
+        if tab == "aura":
+            from alaz.core.state import AuraSyncView
+            st.set_aura_sync(AuraSyncView(True, "breathing", (0xEA, 0xB2, 0x15), 80, {"keyboard", "mouse", "headset"}))
+        theme.apply(app, st.accent)
+        dw = DevicesWindow(st, ctl)
+        dw.tabs.set_current(tab, emit=True)
+        snap(app, dw, out / f"devices_{tab}.png")
+    # unavailable / locked variants
+    from alaz.ui.windows._fake import fake_headset, fake_monitor, fake_mouse
+    st, ctl = make("balanced")
+    st.set_peripheral("mouse", fake_mouse(present=True, permission=False))
+    st.set_peripheral("headset", fake_headset(connected=False))
+    dw = DevicesWindow(st, ctl)
+    dw.tabs.set_current("mouse", emit=True)
+    snap(app, dw, out / "devices_mouse_noperm.png")
+    st, ctl = make("balanced")
+    st.set_peripheral("monitor", fake_monitor(locked={"blue_light", "shadow_boost"},
+                                              values={**fake_monitor().values, "blue_light": None,
+                                                      "shadow_boost": None}))
+    dw = DevicesWindow(st, ctl)
+    dw.tabs.set_current("monitor", emit=True)
+    snap(app, dw, out / "devices_monitor_locked.png")
     snap(app, SettingsWindow(st, ctl, settings, autostart_path=out / "autostart.desktop"), out / "settings.png")
     snap(app, MiniWindow(st, ctl), out / "mini.png")
 

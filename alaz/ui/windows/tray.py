@@ -120,6 +120,7 @@ class Tray(QObject):
         state.sensorsChanged.connect(self._on_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
         state.auraChanged.connect(lambda _v: self._refresh_light())
+        state.peripheralsChanged.connect(lambda _k, _v: self._refresh_info())
         self._refresh_light()
         self._refresh_perf()
         self._refresh_gfx()
@@ -149,6 +150,8 @@ class Tray(QObject):
         # also lives in the menu (opened by clicking the icon).
         self.power = self._heading("")
         self.power.setVisible(False)
+        self.periph = self._heading("")
+        self.periph.setVisible(False)
         self.menu.addSeparator()
         self._heading(tr("PERFORMANS"))
         self.perf_group = QActionGroup(self.menu)
@@ -242,12 +245,26 @@ class Tray(QObject):
             return
         self.icon_updates += 1
 
+    def _periph_text(self) -> str:
+        """'Fare 66 % · Kulaklık 87 %' for the devices that are present and report a battery level."""
+        parts = []
+        m = self.state.peripheral("mouse")
+        if m is not None and m.present and m.permission and not m.asleep and m.battery_pct is not None:
+            parts.append(tr("Fare {pct} %", pct=m.battery_pct))
+        h = self.state.peripheral("headset")
+        if h is not None and h.present and h.permission and h.connected and h.battery_pct is not None:
+            parts.append(tr("Kulaklık {pct} %", pct=h.battery_pct))
+        return " · ".join(parts)
+
     def _refresh_info(self) -> None:
         s = self.state.sensors
         mode = PERF_LABEL.get(self.state.perf_mode, "")
+        dev = self._periph_text()
+        self.periph.setText(dev)
+        self.periph.setVisible(bool(dev))
         if s is None:
             self.info.setText(tr("Veri yok"))
-            self.icon.setToolTip(f"Alaz — {mode}")
+            self.icon.setToolTip(f"Alaz — {mode}" + ("\n" + dev if dev else ""))
             return
         rpm = (s.fans_rpm or {}).get("cpu")
         bat = ""
@@ -258,7 +275,8 @@ class Tray(QObject):
         gpu = {"sleep": tr("Uyku"), "off": tr("Kapalı")}.get(s.gpu_state, f"{fmt_num(s.gpu_temp)} °C")
         tip = f"Alaz — {mode}\nCPU {fmt_num(s.cpu_temp)} °C · GPU {gpu} · Fan {fmt_num(rpm)} rpm"
         ptxt = compose_power(*self._power_w)
-        self.icon.setToolTip(tip + ("\n" + tr("Güç: {value}", value=ptxt) if ptxt else ""))
+        tip += ("\n" + tr("Güç: {value}", value=ptxt) if ptxt else "") + ("\n" + dev if dev else "")
+        self.icon.setToolTip(tip)
         self.power.setText(tr("Güç: {value}", value=ptxt) if ptxt else "")
         self.power.setVisible(bool(ptxt))
 
