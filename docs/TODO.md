@@ -48,3 +48,12 @@ until fixed.
 - [ ] Hide/disable controls for unsupported asusd properties using `SupportedProperties()` (FPPT here).
 - [ ] Custom mode has no separate fan curves (shares Performance/Turbo) — consider app-stored curves.
 - [ ] `docs/ARCHITECTURE.md` is Turkish — translate to English for contributors.
+
+## 5. Peripherals (Devices window) — follow-ups
+Done 2026-10-23: Harpe Ace Mini, Pelta lighting, XG27UCDMG DDC panel, Aura Sync (see `docs/PERIPHERALS.md`).
+- [ ] Owner test on the installed app: every Devices control once (DPI, polling, debounce, sleep, mouse/headset lighting, monitor sliders/combos, input-switch dialog Cancel).
+- [ ] Monitor Aura RGB (0b05:1bfe, report 0xEC on page 0xFF72): protocol unpublished. Best path: USB capture of Armoury Crate on Windows; else owner-approved read-only `EC 82`/`EC B0` probes. Deferred by the owner.
+- [ ] Monitor FD bit-field (VRR, Uniform Brightness, pixel cleaning start…), GamePlus E3/E4/EA, KVM F3: verify by read-only diffs while the owner toggles the OSD, then add.
+- [ ] Mouse lift-off: reply offset not verified (`12 06` reply `01 01 ff 00 …`); the write also resets surface calibration.
+- [ ] Pelta `12 13` keeps reading 1 after `51 10 00 00 00`; meaning unclear (lighting works regardless).
+- [ ] Main window grew to 960 px for the "Cihazlar" row — check on the owner's screen; icon-only button is the fallback.
