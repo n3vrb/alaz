@@ -32,6 +32,31 @@ LED_MODES = (0, 1, 2, 4, 6, 0xF0)
 SAVE = b"\x50\x03"
 
 
+# The LED drives its PWM linearly while UI colours are sRGB (gamma-encoded): sent raw, mixed colours look washed
+# out (VERIFIED visually: #FF5A5F showed pink; its linearised FF 1A 1E looks like the swatch). Writes are
+# linearised; reads are converted back.
+def _srgb_to_linear(c: int) -> int:
+    x = c / 255.0
+    lin = x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+    return round(lin * 255)
+
+
+def _linear_to_srgb(c: int) -> int:
+    x = c / 255.0
+    enc = x * 12.92 if x <= 0.0031308 else 1.055 * x ** (1 / 2.4) - 0.055
+    return round(enc * 255)
+
+
+def led_encode(rgb) -> tuple[int, int, int]:
+    """UI (sRGB) colour -> value written to the LED."""
+    return tuple(_srgb_to_linear(int(c)) for c in rgb)
+
+
+def led_decode(rgb) -> tuple[int, int, int]:
+    """Value read from the LED -> UI (sRGB) colour (lossy for very dark channels)."""
+    return tuple(_linear_to_srgb(int(c)) for c in rgb)
+
+
 @dataclass
 class MouseState:
     present: bool = False
@@ -190,6 +215,7 @@ class MouseClient(HidClientBase):
     def __init__(self, parent: QObject | None = None, *, finder=None,
                  transport_factory: Callable[[str], HidTransport] | None = None):
         super().__init__(parent, finder=finder, transport_factory=transport_factory)
+        self._led_written: dict[tuple, tuple] = {}   # raw LED value -> sRGB colour we wrote (worker thread)
 
     def _fresh_state(self, present: bool, permission: bool) -> MouseState:
         return MouseState(present=present, permission=permission)
@@ -207,6 +233,9 @@ class MouseClient(HidClientBase):
                     break
                 continue
             for key, val in parser(r).items():
+                if key == "led_rgb":
+                    # exact colour if we wrote it (the decode is lossy for dark channels), else decoded
+                    val = self._led_written.get(val) or led_decode(val)
                 setattr(self._state, key, val)
         return ok_first
 
@@ -308,7 +337,9 @@ class MouseClient(HidClientBase):
 
         def writes():
             st = self._state
-            return [build_led(mode, brightness, rgb_t, st.led_direction or 0, st.led_random or 0,
+            raw = led_encode(rgb_t)
+            self._led_written[raw] = rgb_t
+            return [build_led(mode, brightness, raw, st.led_direction or 0, st.led_random or 0,
                               st.led_speed or 0, zone=z) for z in LED_ZONES]
 
         def local():

@@ -108,3 +108,9 @@ cleaning start (FD bit 0x0010, read-modify-write; ~6 min dark screen) — v2. Ne
 EC, D6 (power), E2 writes, FC/FD except the documented RMW, any code not in this table.
 Pending verification (read-only diff while the owner changes the OSD): FD bits (VRR 0x0001, uniform brightness 0x0040, …),
 GamePlus E3/E4/EA, EE, KVM F3.
+
+### Mouse LED colour (VERIFIED visually by the owner)
+The LED is driven linearly; UI colours are sRGB. Sent raw, mixed colours wash out (#FF5A5F showed pink). The
+backend linearises every LED colour before writing (`led_encode`, #FF5A5F → FF 1A 1D) and converts reads back
+(`led_decode`; colours Alaz wrote are remembered so they read back exactly). DPI-stage indicator colours are
+sent raw (not verified). Pelta lighting is sent raw (the owner saw no colour issue there).

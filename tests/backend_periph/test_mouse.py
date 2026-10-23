@@ -170,13 +170,15 @@ def test_set_led_save_variants(qtbot):
     c.refresh()
     settle(c)
     tr.log.clear()
-    c.set_led(0, 80, (1, 2, 3), save=False)
+    c.set_led(0, 80, (0xFF, 0x5A, 0x5F), save=False)
     settle(c)
-    # VERIFIED: zone 0x01 drives the physical LED; zone 0x00 is the copy the LED read reports -> write both
-    assert tr.log == [("send", bytes.fromhex("512801000050010203000000")),
-                      ("send", bytes.fromhex("512800000050010203000000"))]
+    # VERIFIED: zone 0x01 drives the physical LED; zone 0x00 is the copy the LED read reports -> write both.
+    # The colour is linearised for the LED: #FF5A5F -> FF 1A 1D.
+    assert tr.log == [("send", bytes.fromhex("512801000050ff1a1d000000")),
+                      ("send", bytes.fromhex("512800000050ff1a1d000000"))]
+    assert c.state().led_rgb == (0xFF, 0x5A, 0x5F)
     tr.log.clear()
-    c.set_led(0, 80, (1, 2, 3))
+    c.set_led(0, 80, (0xFF, 0x5A, 0x5F))
     settle(c)
     assert [k for k, _ in tr.log] == ["send", "send", "send", "req"]
     assert tr.sent()[2] == b"\x50\x03"
@@ -202,3 +204,25 @@ def test_io_failure_marks_absent(qtbot):
     c.refresh()
     settle(c)
     assert spy[0][0].present is False
+
+
+def test_led_colour_linearised_and_read_back_exactly(qtbot):
+    assert M.led_encode((0xFF, 0x5A, 0x5F)) == (0xFF, 0x1A, 0x1D)
+    assert M.led_encode((0, 128, 255)) == (0, 55, 255)
+    assert M.led_decode((0xFF, 0x1A, 0x1D)) == (0xFF, 0x5A, 0x5F)
+    # a dark colour is lossy through the decode, but a colour WE wrote reads back exactly
+    tr = FakeTransport(replies())
+    c, _ = client_with(tr)
+    c.refresh()
+    settle(c)
+    c.set_led(0, 50, (10, 20, 30))
+    raw = M.led_encode((10, 20, 30))
+    tr.replies[b"\x12\x03\x00"] = rep(3, "12 03 00 00 00 32" + bytes(raw).hex())
+    c.refresh()
+    settle(c)
+    assert c.state().led_rgb == (10, 20, 30)
+    # a value written elsewhere (e.g. Armoury Crate) is decoded
+    tr.replies[b"\x12\x03\x00"] = rep(3, "12 03 00 00 00 32 ff 1a 1d")
+    c.refresh()
+    settle(c)
+    assert c.state().led_rgb == (0xFF, 0x5A, 0x5F)
