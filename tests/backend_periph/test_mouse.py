@@ -53,7 +53,7 @@ def test_builders_exact():
     assert M.build_debounce(8)[-1] == 1 and M.build_debounce(32)[-1] == 7
     assert M.build_angle_snapping(True) == bytes.fromhex("5131060001")
     assert M.build_sleep(3, 20) == bytes.fromhex("51370000030014")
-    assert M.build_led(0, 80, (1, 2, 3)) == bytes.fromhex("512800000050010203000000")
+    assert M.build_led(0, 80, (1, 2, 3)) == bytes.fromhex("512801000050010203000000")  # default = LED zone 0x01
     assert M.build_led(2, 50, (255, 0, 0), 1, 2, 3, zone=1) == bytes.fromhex("51280100023 2ff0000010203".replace(" ", ""))
 
 
@@ -172,12 +172,14 @@ def test_set_led_save_variants(qtbot):
     tr.log.clear()
     c.set_led(0, 80, (1, 2, 3), save=False)
     settle(c)
-    assert tr.log == [("send", bytes.fromhex("512800000050010203000000"))]
+    # VERIFIED: zone 0x01 drives the physical LED; zone 0x00 is the copy the LED read reports -> write both
+    assert tr.log == [("send", bytes.fromhex("512801000050010203000000")),
+                      ("send", bytes.fromhex("512800000050010203000000"))]
     tr.log.clear()
     c.set_led(0, 80, (1, 2, 3))
     settle(c)
-    assert [k for k, _ in tr.log] == ["send", "send", "req"]
-    assert tr.sent()[1] == b"\x50\x03"
+    assert [k for k, _ in tr.log] == ["send", "send", "send", "req"]
+    assert tr.sent()[2] == b"\x50\x03"
 
 
 def test_invalid_write_emits_error_no_io(qtbot):

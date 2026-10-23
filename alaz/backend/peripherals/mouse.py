@@ -19,9 +19,11 @@ VID = 0x0B05
 PIDS = {0x1ACE}
 REPORT_ID = 0x03
 
-# SOURCE (G-Helper HarpeAceMini.cs) says the LED zone byte is 0x01 for the Mini, but reads use 0x00.
-# Pending hardware verification (write static colour, read back) by the orchestrator.
-LED_ZONE = 0x00
+# VERIFIED visually on the owner's Harpe Ace Mini: only zone 0x01 changes the physical LED (as G-Helper does).
+# The LED read (12 03, the zone byte is ignored) reports zone 0x00, a separate stored copy that the LED never
+# shows. Every LED write therefore goes to 0x01 (the LED) and then 0x00 (so reads match what the LED shows).
+LED_ZONE = 0x01
+LED_ZONES = (0x01, 0x00)
 
 POLLING_CODES = {125: 0, 250: 1, 500: 2, 1000: 3}
 POLLING_BY_CODE = {v: k for k, v in POLLING_CODES.items()}
@@ -307,7 +309,7 @@ class MouseClient(HidClientBase):
         def writes():
             st = self._state
             return [build_led(mode, brightness, rgb_t, st.led_direction or 0, st.led_random or 0,
-                              st.led_speed or 0)]
+                              st.led_speed or 0, zone=z) for z in LED_ZONES]
 
         def local():
             self._state.led_mode, self._state.led_brightness, self._state.led_rgb = mode, brightness, rgb_t

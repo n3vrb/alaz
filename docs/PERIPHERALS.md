@@ -43,9 +43,9 @@ Reads (all VERIFIED: values matched the owner's mouse — DPI 800, colour-cycle 
 | `03 12 04 00` | polling code = r[13] & 7 (3); debounce code = r[15] (2); angle snapping = r[17]==1 (0); angle tuning = int16 LE r[19:21] |
 | `03 12 04 02` | 4 DPI stages: stage i X = u16 LE at r[5+4i], Y at r[7+4i]; dpi = raw*50 + 50 (VERIFIED 400/800/1600/3200) |
 | `03 12 04 03` | DPI stage colour i = RGB r[5+3i : 8+3i] |
-| `03 12 03 00` | LED: mode = r[5]; brightness 0–100 = r[6] (50); RGB = r[7:10]; direction r[11]; random r[12]; speed r[13] (VERIFIED mode 2 = colour cycle) |
+| `03 12 03 00` | LED (zone byte ignored; reports the zone 0x00 copy, see LED write): mode = r[5]; brightness 0–100 = r[6] (50); RGB = r[7:10]; direction r[11]; random r[12]; speed r[13] (VERIFIED mode 2 = colour cycle) |
 | `03 12 06` | lift-off: SOURCE says r[8] (0=low,1=high); reply here `01 01 ff 00 …` → offset NOT verified → show read-only "—" until verified |
-`03 12 03 01` times out (only one LED zone).
+(`03 12 03 01` returns the same reply with r[3]=00 — an earlier "timeout" was the probe's matcher expecting r[3]=01.)
 
 Tables: polling code 0=125, 1=250, 2=500, 3=1000 Hz (Mini supports only these). Debounce code n → (n+1)*4 ms for
 n=1..7 (8…32 ms); code 0 ambiguous (4 ms or off) → label "4 ms". Sleep code 0=1 min, 1=2, 2=3, 3=5, 4=10, 0xFF=never.
@@ -61,7 +61,7 @@ Writes (LED + save VERIFIED; the rest SOURCE = G-Helper `AsusMouse.cs`/`HarpeAce
 | debounce | `03 51 31 05 00 <code>` |
 | angle snapping | `03 51 31 06 00 <0/1>` |
 | sleep + low-battery | `03 51 37 00 00 <sleep code> 00 <low %>` (send both, keep the other at its read value) |
-| LED | `03 51 28 00 00 <mode> <bright 0-100> <R> <G> <B> <dir> <random> <speed>` — zone byte **0x00** VERIFIED (static green written and read back; G-Helper's 0x01 not needed) |
+| LED | `03 51 28 <zone> 00 <mode> <bright 0-100> <R> <G> <B> <dir> <random> <speed>` — VERIFIED visually by the owner: only zone **0x01** changes the physical LED (as G-Helper does). The LED read `12 03` ignores its zone byte and reports zone **0x00**, a separate stored copy the LED never shows → write 0x01 then 0x00 so reads match the LED. Save is not needed for the LED to change. |
 | save | `03 50 03` |
 NOT used (avoid): lift-off write `51 35 …` (also resets surface calibration), button remap `51 21`, DPI-count `51 31 0A`,
 profile switch `50 02`, anything on report IDs 1/2 (receiver/keyboard channels), the LampArray interface (hidraw5;
