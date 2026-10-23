@@ -9,7 +9,9 @@ Rule: unknown → None → "—". Never send command bytes that are not listed h
 
 ## Access
 `/dev/hidraw*` are `root 0600`. The app needs a udev rule (installed by `helper/install.sh`, sudo):
-`KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1ace|1b84|1b82", TAG+="uaccess"`.
+`helper/70-alaz-peripherals.rules` — uaccess on the control interface only (mouse iface 2, headset iface 3). VERIFIED:
+only those two nodes get the ACL. Note: all `ATTRS{}` keys of one udev rule must match the same parent device, so the
+rule tags the device by VID/PID first (`ENV{ALAZ_PERIPH}`) and checks `bInterfaceNumber` in a second rule.
 DDC (`/dev/i2c-*`) already works for the user via ddcutil's own rule. If a hidraw node can't be opened → device
 shown as "no permission" with a hint, never a crash.
 
@@ -25,6 +27,8 @@ Write exactly 64 bytes: `[report_id] + command bytes`, zero-padded. Read 64-byte
 Before each request drain pending input. A matching reply has `r[0]==report_id` and echoes the request's
 command bytes (`r[1:3]`, for mouse `12 04 xx` / `12 03 xx` / `12 12 02` also `r[3]`). Ignore non-matching reports
 (the mouse emits async `12 01` button reports). Timeout 500 ms (mouse) / 1000 ms (headset), 2 retries.
+Writes: the device echoes every write (VERIFIED on both: `03 51 28 …`, `03 50 03 …`, `cc 51 10 …`, `cc 51 28 …`) —
+wait for the echo of the first 2 command bytes before the next write; no retry on a lost echo.
 Error reply: `r[1:3] == ff aa` (VERIFIED on headset when the headset is off; SOURCE on mouse: mouse asleep/off) → treat
 the device as "asleep/disconnected", values None. All I/O in a worker thread, one in-flight request per device.
 Data offsets below are indices in the full 64-byte reply `r` (r[0] = report id).
@@ -48,7 +52,7 @@ n=1..7 (8…32 ms); code 0 ambiguous (4 ms or off) → label "4 ms". Sleep code 
 LED modes supported by the Mini: 0 static, 1 breathing, 2 colour cycle, 4 reactive, 6 battery state, 0xF0 off.
 DPI range 100–42000, step 50; 4 stages.
 
-Writes (SOURCE = G-Helper `AsusMouse.cs`/`HarpeAceMini.cs`; each followed by save `03 50 03` once per batch):
+Writes (LED + save VERIFIED; the rest SOURCE = G-Helper `AsusMouse.cs`/`HarpeAceMini.cs`; each followed by save `03 50 03` once per batch):
 | what | bytes |
 |---|---|
 | DPI stage i (0–3), X=Y | `03 51 31 <i> 00 <lo> <hi> <R> <G> <B>` (raw=(dpi-50)/50 LE; RGB = that stage's current colour, read first) |
@@ -57,7 +61,7 @@ Writes (SOURCE = G-Helper `AsusMouse.cs`/`HarpeAceMini.cs`; each followed by sav
 | debounce | `03 51 31 05 00 <code>` |
 | angle snapping | `03 51 31 06 00 <0/1>` |
 | sleep + low-battery | `03 51 37 00 00 <sleep code> 00 <low %>` (send both, keep the other at its read value) |
-| LED | `03 51 28 <zone> 00 <mode> <bright 0-100> <R> <G> <B> <dir> <random> <speed>` — zone byte: SOURCE says 0x01 for the Mini but reads use 0x00 → verify on hardware (write static colour, read back) before shipping |
+| LED | `03 51 28 00 00 <mode> <bright 0-100> <R> <G> <B> <dir> <random> <speed>` — zone byte **0x00** VERIFIED (static green written and read back; G-Helper's 0x01 not needed) |
 | save | `03 50 03` |
 NOT used (avoid): lift-off write `51 35 …` (also resets surface calibration), button remap `51 21`, DPI-count `51 31 0A`,
 profile switch `50 02`, anything on report IDs 1/2 (receiver/keyboard channels), the LampArray interface (hidraw5;
@@ -74,8 +78,9 @@ Reads (VERIFIED with the headset on; with it off the dongle answers `12 00 00 01
 | `cc 12 08` | charging = r[5]==1 |
 | `cc 12 03` | lighting: effect = r[5], brightness 0–100 = r[6], RGB = r[7:10] (VERIFIED 1 static, 50, #EAB215) |
 | `cc 12 13` | software-LED (Aura Sync) mode = r[5] (VERIFIED 1) |
-Writes (SOURCE; the only writes we send):
-- software-LED mode off: `cc 51 10 00 00 00` — MUST precede hardware effects (else they don't run).
+Writes (VERIFIED: static blue written, read back, restored; the only writes we send):
+- software-LED mode off: `cc 51 10 00 00 00` — SOURCE says it must precede hardware effects. It is echoed, but `12 13`
+  still reads 1 afterwards, so that field's meaning is unclear; we send it before every lighting write (harmless).
 - lighting: `cc 51 28 00 00 <effect> <brightness 0-100> <R> <G> <B>`; effects 1 static, 2 breathing, 3 strobing, 4 colour cycle;
   brightness 0 = lights off. No save command (takes effect immediately).
 NOT used: everything else (noise reduction, sidetone, power settings, `51 30` direct colour) — owner only wants RGB.
