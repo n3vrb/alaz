@@ -24,7 +24,7 @@ The owner is Turkish; talk to them in Turkish. UI is Turkish + English (`alaz/i1
 - Git identity is configured to `n3vrb <178571977+n3vrb@users.noreply.github.com>`; never commit with another email. Push only when the owner asks.
 
 ## Hard rules (each one was learned the hard way on real hardware)
-1. NEVER switch the GPU live: no `supergfxctl -m`, no supergfxd `SetMode`/`SetConfig`. Live Eco entry killed gnome-shell; live Eco exit froze it. GPU mode = boot config via the helper + reboot.
+1. NEVER `supergfxctl -m` or supergfxd `SetMode`/`SetConfig` (live Eco entry killed gnome-shell, live Eco exit froze it). Live Eco<->Hybrid switching is done ONLY by the helper's `live-eco` / `live-hybrid` (docs/LIVE_GPU_CONTRACT.md), and only with its preconditions: udev rule 61 (mutter ignores the NVIDIA card) + rule 72 (no uaccess on the NVIDIA renderD), session EGL vendor = mesa, Ubuntu's `71-nvidia.rules` masked + runtime blacklist + `udevadm control --reload` for the duration (else udev loads/unloads nvidia in an endless loop), and NO process holding the dGPU (never kill anything; refuse instead). Ultimate (MUX) is reboot-only. Proven 2026-10-23 on the reference machine.
 2. Eco exit = stop supergfxd → `drivers_autoprobe=0` → config Hybrid → `dgpu_disable=0` → reboot (implemented in the helper; tested).
 3. Do NOT blacklist NVIDIA autoload / change driver load order (caused 4 black-screen boots). Any boot-order change can race GDM: tell the owner the risk + rollback BEFORE they do it, and prefer one-boot tests via GRUB `e`.
 4. Do NOT remove `pcie_aspm=off` (Realtek card reader floods PCIe AER errors without it). `splash` was removed on purpose (Plymouth grabbed the NVIDIA DRM device and broke Eco entry).
