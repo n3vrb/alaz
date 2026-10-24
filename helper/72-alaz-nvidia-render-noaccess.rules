@@ -1,0 +1,4 @@
+# Alaz: no uaccess ACL on the NVIDIA render node, so Chromium/Electron apps do not
+# open and hold the dGPU. /dev/nvidia* stay accessible, so offload (GLX/EGL/Vulkan/
+# CUDA) still works. Only when gpu_mux_mode=1; with Ultimate (MUX=0) nothing changes.
+SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="nvidia", PROGRAM=="/usr/bin/cat /sys/devices/platform/asus-nb-wmi/gpu_mux_mode", RESULT=="1", TAG-="uaccess"

@@ -7,6 +7,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 rm -f /usr/local/libexec/alaz-gfx-helper /usr/share/polkit-1/actions/org.alaz.gfx.policy
 rm -f /etc/udev/rules.d/90-alaz-rapl.rules /etc/udev/rules.d/70-alaz-peripherals.rules
+rm -f /etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules /etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules
 # former name (ROG Control)
 rm -f /usr/local/libexec/rog-control-gfx-helper /usr/share/polkit-1/actions/org.rogcontrol.gfx.policy
 rm -f /etc/udev/rules.d/90-rog-control-rapl.rules

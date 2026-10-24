@@ -1,0 +1,5 @@
+# Alaz: make mutter (gnome-shell) ignore the NVIDIA DRM card, so it never opens
+# the dGPU and live GPU switching (Hybrid <-> Eco) cannot disturb the compositor.
+# Only when the MUX is not dGPU-direct (gpu_mux_mode=1); with Ultimate (MUX=0)
+# the NVIDIA card drives the display and must stay visible to mutter.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", DRIVERS=="nvidia", PROGRAM=="/usr/bin/cat /sys/devices/platform/asus-nb-wmi/gpu_mux_mode", RESULT=="1", TAG+="mutter-device-ignore"

@@ -44,6 +44,11 @@ autostart_file="$config_home/autostart/alaz.desktop"
 unit_dir="$config_home/systemd/user"
 unit_file="$unit_dir/alaz.service"
 
+# Live GPU switching: keep Xwayland/gnome-shell off the NVIDIA EGL vendor library (needs re-login).
+egl_conf="$config_home/environment.d/90-alaz-egl-mesa.conf"
+egl_json="/usr/share/glvnd/egl_vendor.d/50_mesa.json"
+egl_line="__EGL_VENDOR_LIBRARY_FILENAMES=$egl_json"
+
 # Files of the former name (ROG Control), migrated/removed on install and uninstall.
 old_unit_file="$unit_dir/rog-control.service"
 old_app_dir="$data_home/rog-control"
@@ -91,6 +96,10 @@ if [ "$uninstall" -eq 1 ]; then
     sctl daemon-reload >/dev/null 2>&1 || true
     rm -rf "$app_dir"
     rm -f "$bin_file" "$desktop_file" "$icon_file" "$autostart_file"
+    if [ -f "$egl_conf" ] && [ "$(cat "$egl_conf")" = "$egl_line" ]; then
+        rm -f "$egl_conf"
+        echo "Removed $egl_conf"
+    fi
     for s in $icon_sizes; do rm -f "$data_home/icons/hicolor/${s}x${s}/apps/alaz.png"; done
     migrate_old_install
     refresh_caches
@@ -185,6 +194,21 @@ if [ "$autostart" -eq 1 ]; then
 fi
 if [ "$start" -eq 1 ]; then
     sctl start alaz.service || echo "warning: could not start alaz.service" >&2
+fi
+
+# environment.d snippet (idempotent; never clobbers a modified file)
+if [ -f "$egl_json" ] || [ -n "${ALAZ_EGL_JSON_FORCE:-}" ]; then
+    if [ ! -e "$egl_conf" ]; then
+        mkdir -p "$(dirname "$egl_conf")"
+        printf '%s\n' "$egl_line" > "$egl_conf"
+        echo "Installed $egl_conf"
+        echo "  Yeni ortam değişkeni için oturumu kapatıp yeniden açın / log out and in again for it to take effect."
+    elif [ "$(cat "$egl_conf")" = "$egl_line" ]; then
+        :
+    else
+        echo "warning: $egl_conf exists with different content; left untouched." >&2
+        echo "  uyarı: $egl_conf farklı içerikle mevcut; dokunulmadı." >&2
+    fi
 fi
 
 echo "Installed Alaz:"

@@ -14,5 +14,34 @@
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/alaz-gfx-helper</annotate>
+    <!-- pkexec takes the FIRST action whose exec.path matches and whose exec.argv1 (if any) matches;
+         without argv1 this action matched live-eco/live-hybrid too and asked for a password. -->
+    <annotate key="org.freedesktop.policykit.exec.argv1">set-boot-mode</annotate>
+  </action>
+  <action id="org.alaz.gfx.live-eco">
+    <description>Switch the GPU to Eco now (the dGPU is powered off)</description>
+    <description xml:lang="tr">GPU'yu şimdi Eco moduna al (dGPU kapatılır)</description>
+    <message>Authentication is required to switch the GPU to Eco now</message>
+    <message xml:lang="tr">GPU'yu Eco moduna almak için kimlik doğrulaması gerekir</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/alaz-gfx-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">live-eco</annotate>
+  </action>
+  <action id="org.alaz.gfx.live-hybrid">
+    <description>Switch the GPU to Hybrid now (the dGPU is powered on)</description>
+    <description xml:lang="tr">GPU'yu şimdi Hybrid moduna al (dGPU açılır)</description>
+    <message>Authentication is required to switch the GPU to Hybrid now</message>
+    <message xml:lang="tr">GPU'yu Hybrid moduna almak için kimlik doğrulaması gerekir</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/alaz-gfx-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">live-hybrid</annotate>
   </action>
 </policyconfig>

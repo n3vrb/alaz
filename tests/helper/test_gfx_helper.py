@@ -270,7 +270,8 @@ def test_env_ignored_when_euid_root(tree):
 def test_status_readonly(tree):
     rc, out, _ = run(tree, ["status"], fake_root=False)
     assert rc == 0
-    assert json.loads(out) == {"configured_mode": "Hybrid", "dgpu_disable": 0, "gpu_mux_mode": 1}
+    assert json.loads(out) == {"configured_mode": "Hybrid", "dgpu_disable": 0, "gpu_mux_mode": 1,
+                               "holders": [], "live_ready": False}
     assert conf(tree).read_text() == ORIG
     assert not (tree / "etc/supergfxd.conf.alaz.bak").exists()
 

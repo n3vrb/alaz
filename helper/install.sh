@@ -16,6 +16,10 @@ install -m 0644 -o root -g root "$here/org.alaz.gfx.policy" /usr/share/polkit-1/
 install -d -m 0755 -o root -g root /etc/udev/rules.d
 install -m 0644 -o root -g root "$here/90-alaz-rapl.rules" /etc/udev/rules.d/90-alaz-rapl.rules
 install -m 0644 -o root -g root "$here/70-alaz-peripherals.rules" /etc/udev/rules.d/70-alaz-peripherals.rules
+# Live GPU switching preconditions (MUX=1 only). Rules only take effect for devices (re)added later:
+# deliberately NO "udevadm trigger" on drm, so a running session is not disturbed.
+install -m 0644 -o root -g root "$here/61-alaz-mutter-ignore-nvidia.rules" /etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules
+install -m 0644 -o root -g root "$here/72-alaz-nvidia-render-noaccess.rules" /etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules
 if command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload-rules || true
     udevadm trigger --subsystem-match=powercap --action=change || true
@@ -23,3 +27,4 @@ if command -v udevadm >/dev/null 2>&1; then
     udevadm settle --timeout=5 || true
 fi
 echo "Kuruldu / installed."
+echo "Canlı GPU geçişi için çıkış yapıp tekrar giriş yapın (ve ./install.sh çalıştırın) / for live GPU switching log out and in again (and run ./install.sh)."

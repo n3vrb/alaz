@@ -21,6 +21,12 @@ A reboot is REQUIRED right after (drivers_autoprobe stays 0 until then).
 Usage:
   alaz-gfx-helper set-boot-mode {integrated|hybrid}
   alaz-gfx-helper status
+  alaz-gfx-helper live-eco | live-hybrid | holders   (see docs/LIVE_GPU_CONTRACT.md)
+
+The live-* commands switch the dGPU WITHOUT a reboot (exit codes 9-12, last stdout
+line = one JSON object). They never kill a process: if anything holds the dGPU the
+switch is refused (exit 9). A udev mask + runtime modprobe blacklist is active only
+while a live switch runs and is always removed again.
 
 Exit codes: 0 ok/no change, 2 usage, 3 (reserved, unused; was "Eco-exit
 unsupported"), 4 MUX direct refuses Eco, 5 not root, 6 config error
@@ -36,12 +42,16 @@ from ALAZ_HELPER_FAKE_ROOT=1. When euid == 0 (i.e. under pkexec) both
 variables are IGNORED, so they cannot be used to redirect a real root run.
 Only the stdlib is used; no $PATH reliance.
 """
+import glob
 import json
 import os
+import pwd
 import re
+import signal
 import stat
 import subprocess
 import sys
+import time
 
 CONFIG = "/etc/supergfxd.conf"
 BACKUP = "/etc/supergfxd.conf.alaz.bak"
@@ -50,6 +60,19 @@ GPU_MUX_MODE = "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode"
 AUTOPROBE = "/sys/bus/pci/drivers_autoprobe"
 SYSTEMCTL = "/usr/bin/systemctl"
 SUPERGFXD_UNIT = "supergfxd.service"
+RULE61 = "/etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules"
+UDEVADM = "/usr/bin/udevadm"
+MODPROBE_CANDIDATES = ("/usr/sbin/modprobe", "/sbin/modprobe", "/usr/bin/modprobe")
+UB_CANDIDATES = ("/usr/sbin/ub-device-create", "/sbin/ub-device-create")
+MASK_NAME = "71-nvidia.rules"
+BLACKLIST_NAME = "alaz-live-nvidia.conf"
+BLACKLIST_TEXT = "blacklist nvidia\nblacklist nvidia_drm\nblacklist nvidia_modeset\nblacklist nvidia_uvm\n"
+PERSISTENCED_UNIT = "nvidia-persistenced.service"
+UNLOAD_ORDER = ("nvidia_drm", "nvidia_modeset", "nvidia_uvm", "nvidia")
+LOAD_ORDER = ("nvidia", "nvidia_modeset", "nvidia_drm", "nvidia_uvm")
+NVIDIA_VENDOR = "0x10de"
+_PCI_RE = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")
+_DRM_RE = re.compile(r"^(card[0-9]+|renderD[0-9]+)$")
 CLEAN_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
 
 ENV_ROOT = "ALAZ_HELPER_TESTROOT"
@@ -57,7 +80,8 @@ ENV_FAKE = "ALAZ_HELPER_FAKE_ROOT"
 
 USAGE = ("Kullanım / Usage:\n"
          "  alaz-gfx-helper set-boot-mode {integrated|hybrid}\n"
-         "  alaz-gfx-helper status\n")
+         "  alaz-gfx-helper status\n"
+         "  alaz-gfx-helper live-eco | live-hybrid | holders\n")
 
 MODES = {"integrated": "Integrated", "hybrid": "Hybrid"}
 _MODE_RE = re.compile(r'("mode"\s*:\s*)"([^"\\]*)"')
@@ -70,18 +94,37 @@ class HelperError(Exception):
         self.msg = msg
 
 
+def _pick_exe(root, candidates):
+    """First candidate that exists under `root` (root=None: the real system)."""
+    for c in candidates:
+        full = c if root is None else os.path.join(root, c.lstrip("/"))
+        if os.path.exists(full):
+            return full
+    c = candidates[0]
+    return c if root is None else os.path.join(root, c.lstrip("/"))
+
+
 def resolve_env(environ, euid):
     """Return (paths dict, is_root). Test env is honoured only if euid != 0."""
     paths = {"config": CONFIG, "backup": BACKUP,
              "dgpu_disable": DGPU_DISABLE, "gpu_mux_mode": GPU_MUX_MODE,
-             "autoprobe": AUTOPROBE, "systemctl": SYSTEMCTL}
-    if euid == 0:
-        return paths, True
-    root = environ.get(ENV_ROOT)
-    if not root:
-        return paths, False
-    paths = {k: os.path.join(root, v.lstrip("/")) for k, v in paths.items()}
-    return paths, environ.get(ENV_FAKE) == "1"
+             "autoprobe": AUTOPROBE, "systemctl": SYSTEMCTL,
+             "udevadm": UDEVADM, "rule61": RULE61,
+             "pci_devices": "/sys/bus/pci/devices", "pci_rescan": "/sys/bus/pci/rescan",
+             "pci_probe": "/sys/bus/pci/drivers_probe", "sys_module": "/sys/module",
+             "drm_class": "/sys/class/drm", "proc": "/proc",
+             "run_udev_rules": "/run/udev/rules.d", "run_modprobe": "/run/modprobe.d"}
+    root = None
+    is_root = True
+    if euid != 0:
+        root = environ.get(ENV_ROOT) or None
+        if root is None:
+            return paths, False
+        paths = {k: os.path.join(root, v.lstrip("/")) for k, v in paths.items()}
+        is_root = environ.get(ENV_FAKE) == "1"
+    paths["modprobe"] = _pick_exe(root, MODPROBE_CANDIDATES)
+    paths["ub_device_create"] = _pick_exe(root, UB_CANDIDATES)
+    return paths, is_root
 
 
 def _read_int(path):
@@ -148,15 +191,25 @@ def _write_sysfs(path, value):
         f.write(value)
 
 
-def _stop_supergfxd(systemctl):
-    """Run `systemctl stop supergfxd.service`; return None on success else a message."""
+def _run(cmd, timeout):
+    """The ONLY place a subprocess is started: absolute argv, no shell, clean env,
+    timeout. Returns the exit code, or None if it could not run / timed out.
+    Tests replace this function."""
     try:
-        r = subprocess.run([systemctl, "stop", SUPERGFXD_UNIT], timeout=30, check=False,
+        r = subprocess.run(cmd, timeout=timeout, check=False,
                            env=dict(CLEAN_ENV), stdin=subprocess.DEVNULL,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        return str(e)
-    return None if r.returncode == 0 else "systemctl çıkış kodu / exit code %d" % r.returncode
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.returncode
+
+
+def _stop_supergfxd(systemctl):
+    """Run `systemctl stop supergfxd.service`; return None on success else a message."""
+    rc = _run([systemctl, "stop", SUPERGFXD_UNIT], 30)
+    if rc is None:
+        return "systemctl çalıştırılamadı / could not run systemctl"
+    return None if rc == 0 else "systemctl çıkış kodu / exit code %d" % rc
 
 
 def _eco_exit_rest(paths, restore, err):
@@ -195,15 +248,570 @@ def _eco_exit_rest(paths, restore, err):
     return 0
 
 
+def _apply_mode(paths, target, euid, parsed=None):
+    """Write the boot config mode (atomic, backup first). Returns (changed, restore);
+    `restore` rolls the config back (None when nothing was written)."""
+    text, data, st = parsed if parsed is not None else _read_config(paths["config"])
+    if data["mode"] == target:
+        return False, None
+    if len(_MODE_RE.findall(text)) != 1:
+        raise HelperError(6, "'mode' anahtarı belirsiz / ambiguous 'mode' key")
+    new_text = _MODE_RE.sub(lambda m: '%s"%s"' % (m.group(1), target), text, count=1)
+    new_data = json.loads(new_text)
+    expect = dict(data)
+    expect["mode"] = target
+    if new_data != expect or list(new_data) != list(data):
+        raise HelperError(6, "Doğrulama başarısız / verification failed")
+    real = (euid == 0)
+    _atomic_write(paths["backup"], text, 0o644, st.st_uid, st.st_gid, real)
+    _atomic_write(paths["config"], new_text, 0o644, st.st_uid, st.st_gid, real)
+    restore = lambda: _atomic_write(paths["config"], text, 0o644, st.st_uid, st.st_gid, real)
+    return True, restore
+
+
+# ---------------------------------------------------------------- PCI / holders
+
+def _read_text(path):
+    try:
+        with open(path, "r") as f:
+            return f.read().strip()
+    except (OSError, ValueError):
+        return None
+
+
+def _pci_names(paths):
+    try:
+        names = sorted(os.listdir(paths["pci_devices"]))
+    except OSError:
+        return []
+    return [n for n in names if _PCI_RE.match(n)]
+
+
+def _find_nvidia(paths):
+    """Address of the NVIDIA display (VGA/3D) function, or None (also when absent in Eco)."""
+    for n in _pci_names(paths):
+        d = os.path.join(paths["pci_devices"], n)
+        if _read_text(os.path.join(d, "vendor")) != NVIDIA_VENDOR:
+            continue
+        cls = _read_text(os.path.join(d, "class"))
+        if cls and cls.startswith("0x03"):
+            return n
+    return None
+
+
+def _siblings(paths, addr):
+    """Other NVIDIA functions in the same slot (audio, ...), highest function first."""
+    slot = addr.rsplit(".", 1)[0]
+    out = []
+    for n in _pci_names(paths):
+        if n != addr and n.rsplit(".", 1)[0] == slot and \
+                _read_text(os.path.join(paths["pci_devices"], n, "vendor")) == NVIDIA_VENDOR:
+            out.append(n)
+    return sorted(out, reverse=True)
+
+
+def _driver_of(paths, addr):
+    try:
+        return os.path.basename(os.readlink(os.path.join(paths["pci_devices"], addr, "driver")))
+    except OSError:
+        return None
+
+
+def _has_drm_card(paths, addr):
+    return bool(glob.glob(os.path.join(glob.escape(paths["pci_devices"]), addr, "drm", "card[0-9]*")))
+
+
+def _nvidia_drm_nodes(paths):
+    nodes = set()
+    try:
+        names = os.listdir(paths["drm_class"])
+    except OSError:
+        return nodes
+    for n in names:
+        if not _DRM_RE.match(n):
+            continue
+        try:
+            drv = os.path.basename(os.readlink(os.path.join(paths["drm_class"], n, "device", "driver")))
+        except OSError:
+            continue
+        if drv == "nvidia":
+            nodes.add("/dev/dri/" + n)
+    return nodes
+
+
+def _user_name(uid):
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except (KeyError, OverflowError):
+        return str(uid)
+
+
+def _find_holders(paths):
+    """Processes with /dev/nvidia* or an NVIDIA DRM node open (nvidia-persistenced
+    excluded). Read-only. As non-root, other users' processes may be invisible."""
+    drm = _nvidia_drm_nodes(paths)
+    proc = paths["proc"]
+    result = []
+    try:
+        pids = [n for n in os.listdir(proc) if n.isdigit()]
+    except OSError:
+        return result
+    for pid in pids:
+        pdir = os.path.join(proc, pid)
+        comm = _read_text(os.path.join(pdir, "comm"))
+        if comm is None or comm.startswith("nvidia-persiste"):
+            continue
+        try:
+            fds = os.listdir(os.path.join(pdir, "fd"))
+        except OSError:
+            continue
+        hit = set()
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(pdir, "fd", fd))
+            except OSError:
+                continue
+            if target.endswith(" (deleted)"):
+                target = target[:-len(" (deleted)")]
+            if target.startswith("/dev/nvidia") or target in drm:
+                hit.add(target)
+        if not hit:
+            continue
+        try:
+            uid = os.stat(pdir).st_uid
+        except OSError:
+            continue
+        try:
+            exe = os.readlink(os.path.join(pdir, "exe"))
+        except OSError:
+            exe = None
+        result.append({"pid": int(pid), "comm": comm, "user": _user_name(uid),
+                       "exe": exe, "nodes": sorted(hit)})
+    result.sort(key=lambda h: h["pid"])
+    return result
+
+
+def _rule61_present(paths):
+    txt = _read_text(paths["rule61"])
+    return txt is not None and "mutter-device-ignore" in txt
+
+
+def _emit(out, obj):
+    out.write(json.dumps(obj) + "\n")
+
+
+def _log(err, msg):
+    err.write(msg + "\n")
+
+
+# ---------------------------------------------------------------- udev quieting
+
+class UdevQuiet:
+    """Mask Ubuntu's 71-nvidia.rules and blacklist the NVIDIA modules at runtime
+    (both under /run, gone at reboot). disable() is idempotent and always reloads udev
+    when something was created."""
+
+    def __init__(self, paths, err):
+        self.mask = os.path.join(paths["run_udev_rules"], MASK_NAME)
+        self.bl = os.path.join(paths["run_modprobe"], BLACKLIST_NAME)
+        self.udevadm = paths["udevadm"]
+        self.err = err
+        self.mask_made = False
+        self.bl_made = False
+
+    def enable(self):
+        os.makedirs(os.path.dirname(self.mask), mode=0o755, exist_ok=True)
+        os.makedirs(os.path.dirname(self.bl), mode=0o755, exist_ok=True)
+        # the mask: a symlink to /dev/null that WE create. A leftover symlink to
+        # /dev/null (crashed earlier run) is replaced; anything else is refused.
+        if os.path.lexists(self.mask):
+            if stat.S_ISLNK(os.lstat(self.mask).st_mode) and os.readlink(self.mask) == "/dev/null":
+                os.unlink(self.mask)
+            else:
+                raise OSError("%s exists and is not a /dev/null symlink" % self.mask)
+        os.symlink("/dev/null", self.mask)
+        self.mask_made = True
+        if os.path.lexists(self.bl):
+            if stat.S_ISDIR(os.lstat(self.bl).st_mode):
+                raise OSError("%s is a directory" % self.bl)
+            os.unlink(self.bl)
+        fd = os.open(self.bl, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        self.bl_made = True
+        with os.fdopen(fd, "w") as f:
+            f.write(BLACKLIST_TEXT)
+        if _run([self.udevadm, "control", "--reload"], 30) != 0:
+            raise OSError("udevadm control --reload failed")
+
+    def disable(self):
+        touched = self.mask_made or self.bl_made
+        if self.mask_made:
+            try:
+                if stat.S_ISLNK(os.lstat(self.mask).st_mode):
+                    os.unlink(self.mask)
+            except OSError as e:
+                _log(self.err, "UYARI / WARNING: mask silinemedi / cannot remove mask: %s" % e)
+            self.mask_made = False
+        if self.bl_made:
+            try:
+                os.unlink(self.bl)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                _log(self.err, "UYARI / WARNING: kara liste silinemedi / cannot remove blacklist: %s" % e)
+            self.bl_made = False
+        if touched and _run([self.udevadm, "control", "--reload"], 30) != 0:
+            _log(self.err, "UYARI / WARNING: udevadm control --reload başarısız / failed")
+
+
+# ---------------------------------------------------------------- live switching
+
+_sleep = time.sleep
+
+
+class Abort(Exception):
+    """Failed BEFORE any persistent change (after rollback): exit 12."""
+    def __init__(self, step):
+        super().__init__(step)
+        self.step = step
+
+
+class Failed(Exception):
+    """Failed AFTER the boot config became the target: exit 10, reboot completes it."""
+    def __init__(self, step):
+        super().__init__(step)
+        self.step = step
+
+
+class _Interrupted(BaseException):
+    pass
+
+
+def _on_signal(signum, frame):
+    raise _Interrupted()
+
+
+def _install_signals(euid):
+    if euid != 0:
+        return
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            pass
+
+
+def _systemctl(paths, *args):
+    return _run([paths["systemctl"]] + list(args), 30)
+
+
+def _settle(paths):
+    _run([paths["udevadm"], "settle", "--timeout=30"], 40)
+
+
+def _precheck(paths, is_root, err, out):
+    """Common checks. Returns (exit_code, parsed_config) ; exit_code None = go on."""
+    if not is_root:
+        _log(err, "root yetkisi gerekli / root privileges required")
+        _emit(out, {"ok": False, "error": "root"})
+        return 5, None
+    mux = _read_int(paths["gpu_mux_mode"])
+    if mux == 0:
+        _log(err, "Ultimate (dGPU doğrudan) MUX modunda canlı geçiş yok / live switching unsupported with dGPU-direct MUX")
+        _emit(out, {"ok": False, "error": "mux"})
+        return 4, None
+    missing = []
+    if mux != 1:
+        missing.append("gpu_mux_mode")
+    if _read_int(paths["dgpu_disable"]) not in (0, 1):
+        missing.append("dgpu_disable")
+    if not _rule61_present(paths):
+        missing.append(RULE61)
+    if not os.path.exists(paths["modprobe"]):
+        missing.append("modprobe")
+    if missing:
+        _log(err, "önkoşul eksik / precondition missing: %s" % ", ".join(missing))
+        _emit(out, {"ok": False, "error": "precondition", "missing": missing})
+        return 11, None
+    try:
+        parsed = _read_config(paths["config"])
+    except HelperError as e:
+        _log(err, e.msg)
+        _emit(out, {"ok": False, "error": "config"})
+        return e.code, None
+    return None, parsed
+
+
+def _start_services(paths, units):
+    for u in units:
+        _systemctl(paths, "reset-failed", u)
+        _systemctl(paths, "start", u)
+
+
+def cmd_live_eco(paths, is_root, euid, out, err):
+    code, parsed = _precheck(paths, is_root, err, out)
+    if code is not None:
+        return code
+    if _read_int(paths["dgpu_disable"]) == 1:
+        _log(err, "dGPU zaten kapalı / dGPU already off")
+        _emit(out, {"ok": True, "mode": "Integrated", "changed": False})
+        return 0
+    addr = _find_nvidia(paths)
+    if addr is None:
+        _log(err, "NVIDIA PCI aygıtı bulunamadı / NVIDIA PCI device not found")
+        _emit(out, {"ok": False, "error": "precondition", "missing": ["nvidia-pci-device"]})
+        return 11
+    holders = _find_holders(paths)
+    if holders:
+        _log(err, "dGPU kullanımda / dGPU busy: %s" % ", ".join(h["comm"] for h in holders))
+        _emit(out, {"ok": False, "error": "busy", "holders": holders})
+        return 9
+
+    _install_signals(euid)
+    quiet = UdevQuiet(paths, err)
+    state = {"committed": False, "step": "mask", "removed": [], "persistenced": False,
+             "supergfxd_stopped": False}
+
+    def restore_services():
+        units = []
+        if state["persistenced"]:
+            units.append(PERSISTENCED_UNIT)
+        if state["supergfxd_stopped"]:
+            units.append(SUPERGFXD_UNIT)
+        _start_services(paths, units)
+
+    def reload_modules():
+        failed = []
+        for m in LOAD_ORDER:
+            if m in state["removed"]:
+                if _run([paths["modprobe"], m], 60) != 0:
+                    failed.append(m)
+        return failed
+
+    try:
+        try:
+            state["step"] = "mask"
+            try:
+                quiet.enable()
+            except OSError as e:
+                _log(err, "udev maskesi kurulamadı / cannot set udev mask: %s" % e)
+                raise Abort("mask")
+            state["step"] = "supergfxd-stop"
+            _log(err, "1/6 supergfxd durduruluyor / stopping supergfxd")
+            if _stop_supergfxd(paths["systemctl"]) is not None:
+                _emit(out, {"ok": False, "error": "supergfxd"})
+                return 7
+            state["supergfxd_stopped"] = True
+            state["step"] = "persistenced-stop"
+            _log(err, "2/6 nvidia-persistenced durduruluyor / stopping nvidia-persistenced")
+            if _systemctl(paths, "is-active", "--quiet", PERSISTENCED_UNIT) == 0:
+                state["persistenced"] = True
+                if _systemctl(paths, "stop", PERSISTENCED_UNIT) != 0:
+                    raise Abort("persistenced-stop")
+            state["step"] = "holders"
+            holders = _find_holders(paths)
+            if holders:
+                restore_services()
+                _log(err, "son anda dGPU'yu tutan süreç çıktı / a process grabbed the dGPU")
+                _emit(out, {"ok": False, "error": "busy", "holders": holders})
+                return 9
+            _log(err, "3/6 NVIDIA modülleri kaldırılıyor / unloading NVIDIA modules")
+            for m in UNLOAD_ORDER:
+                state["step"] = "modprobe-r:" + m
+                if not os.path.exists(os.path.join(paths["sys_module"], m)):
+                    continue
+                if _run([paths["modprobe"], "-r", m], 30) != 0:
+                    raise Abort(state["step"])
+                state["removed"].append(m)
+            state["step"] = "config"
+            _log(err, "4/6 yapılandırma -> Integrated / boot config -> Integrated")
+            try:
+                _apply_mode(paths, "Integrated", euid, parsed)
+            except (HelperError, OSError, ValueError) as e:
+                _log(err, "yapılandırma yazılamadı / config write failed: %s" % e)
+                raise Abort("config")
+        except (Abort, _Interrupted) as e:
+            step = e.step if isinstance(e, Abort) else state["step"]
+            failed = reload_modules()
+            restore_services()
+            quiet.disable()
+            payload = {"ok": False, "error": "aborted", "step": step}
+            if failed:
+                payload["reload_failed"] = failed
+            _log(err, "iptal edildi, hiçbir kalıcı değişiklik yok / aborted at %s" % step)
+            _emit(out, payload)
+            return 12
+
+        # ---- committed: boot config is Integrated; failures below -> exit 10
+        state["committed"] = True
+        try:
+            _log(err, "5/6 PCI aygıtları kaldırılıyor / removing PCI devices")
+            state["step"] = "pci-remove"
+            for a in _siblings(paths, addr) + [addr]:
+                _write_sysfs(os.path.join(paths["pci_devices"], a, "remove"), "1")
+            _log(err, "6/6 dgpu_disable=1 (5-10 sn sürebilir / may take 5-10 s)")
+            state["step"] = "dgpu_disable"
+            _write_sysfs(paths["dgpu_disable"], "1")
+            if _read_int(paths["dgpu_disable"]) != 1:
+                raise Failed("dgpu_disable")
+            quiet.disable()
+            state["step"] = "supergfxd-start"
+            _start_services(paths, [SUPERGFXD_UNIT])
+        except (OSError, Failed, _Interrupted) as e:
+            step = e.step if isinstance(e, Failed) else state["step"]
+            _log(err, "yarıda başarısız / failed midway at %s; yeniden başlatma gerekli / reboot required" % step)
+            quiet.disable()
+            _emit(out, {"ok": False, "error": "failed", "step": step, "reboot_required": True})
+            return 10
+        _emit(out, {"ok": True, "mode": "Integrated", "changed": True})
+        return 0
+    except _Interrupted:
+        quiet.disable()
+        _emit(out, {"ok": False, "error": "failed", "step": state["step"],
+                    "reboot_required": state["committed"]})
+        return 10
+    finally:
+        quiet.disable()
+
+
+def cmd_live_hybrid(paths, is_root, euid, out, err):
+    code, parsed = _precheck(paths, is_root, err, out)
+    if code is not None:
+        return code
+    need_exit = _read_int(paths["dgpu_disable"]) == 1
+    addr = _find_nvidia(paths)
+    if not need_exit and addr is not None and _driver_of(paths, addr) == "nvidia" \
+            and _has_drm_card(paths, addr):
+        _log(err, "dGPU zaten açık / dGPU already on")
+        _emit(out, {"ok": True, "mode": "Hybrid", "changed": False})
+        return 0
+
+    _install_signals(euid)
+    quiet = UdevQuiet(paths, err)
+    state = {"step": "mask"}
+    try:
+        try:
+            try:
+                quiet.enable()
+            except OSError as e:
+                _log(err, "udev maskesi kurulamadı / cannot set udev mask: %s" % e)
+                raise Abort("mask")
+            state["step"] = "eco-exit"
+            _log(err, "1/6 yapılandırma Hybrid, supergfxd durdur, autoprobe=0, dgpu_disable=0")
+            try:
+                changed, restore = _apply_mode(paths, "Hybrid", euid, parsed)
+            except (HelperError, OSError, ValueError) as e:
+                _log(err, "yapılandırma yazılamadı / config write failed: %s" % e)
+                raise Abort("config")
+        except (Abort, _Interrupted) as e:
+            step = e.step if isinstance(e, Abort) else state["step"]
+            quiet.disable()
+            _emit(out, {"ok": False, "error": "aborted", "step": step})
+            return 12
+        # from here the boot config is Hybrid
+        try:
+            if need_exit:
+                rc = _eco_exit_rest(paths, restore, err)
+                if rc == 7:
+                    quiet.disable()
+                    _emit(out, {"ok": False, "error": "supergfxd"})
+                    return 7
+                if rc:
+                    raise Failed("dgpu_disable")
+            else:
+                if _stop_supergfxd(paths["systemctl"]) is not None:
+                    if restore is not None:
+                        try:
+                            restore()
+                        except (OSError, HelperError):
+                            pass
+                    quiet.disable()
+                    _emit(out, {"ok": False, "error": "supergfxd"})
+                    return 7
+            state["step"] = "pci-wait"
+            _log(err, "2/6 GPU'nun PCI'da görünmesi bekleniyor / waiting for the GPU on PCI")
+            addr = None
+            for i in range(15):
+                addr = _find_nvidia(paths)
+                if addr is not None:
+                    break
+                if i == 5:
+                    try:
+                        _write_sysfs(paths["pci_rescan"], "1")
+                    except OSError:
+                        pass
+                _sleep(1)
+            if addr is None:
+                raise Failed("pci-wait")
+            _settle(paths)
+            state["step"] = "autoprobe"
+            _log(err, "3/6 drivers_autoprobe=1")
+            _write_sysfs(paths["autoprobe"], "1")
+            _log(err, "4/6 NVIDIA modülleri yükleniyor / loading NVIDIA modules")
+            for m in LOAD_ORDER:
+                state["step"] = "modprobe:" + m
+                if _run([paths["modprobe"], m], 60) != 0:
+                    raise Failed(state["step"])
+                _settle(paths)
+                if not os.path.exists(os.path.join(paths["sys_module"], m)):
+                    raise Failed("module-vanished:" + m)
+            state["step"] = "driver-bind"
+            if _driver_of(paths, addr) != "nvidia":
+                raise Failed("driver-bind")
+            if not _has_drm_card(paths, addr):
+                raise Failed("drm-card")
+            state["step"] = "post-bind"
+            if os.path.exists(paths["ub_device_create"]):
+                if _run([paths["ub_device_create"]], 30) != 0:
+                    _log(err, "UYARI / WARNING: ub-device-create başarısız / failed")
+            try:
+                ctl = os.path.join(paths["pci_devices"], addr, "power", "control")
+                if os.access(ctl, os.W_OK):
+                    _write_sysfs(ctl, "auto")
+            except OSError:
+                pass
+            _log(err, "5/6 ses aygıtı bağlanıyor / binding the audio function")
+            for sib in _siblings(paths, addr):
+                try:
+                    _write_sysfs(paths["pci_probe"], sib)
+                except OSError:
+                    pass
+            _log(err, "6/6 udev geri açılıyor, servisler başlatılıyor / restoring udev, starting services")
+            state["step"] = "udev-restore"
+            quiet.disable()
+            state["step"] = "services-start"
+            _start_services(paths, [PERSISTENCED_UNIT])
+            _start_services(paths, [SUPERGFXD_UNIT])
+        except (OSError, Failed, _Interrupted) as e:
+            step = e.step if isinstance(e, Failed) else state["step"]
+            _log(err, "yarıda başarısız / failed midway at %s; yeniden başlatma gerekli / reboot required" % step)
+            quiet.disable()
+            _emit(out, {"ok": False, "error": "failed", "step": step, "reboot_required": True})
+            return 10
+        _emit(out, {"ok": True, "mode": "Hybrid", "changed": True})
+        return 0
+    finally:
+        quiet.disable()
+
+
+def cmd_holders(paths, out, err):
+    _emit(out, {"ok": True, "dgpu_present": _find_nvidia(paths) is not None,
+                "holders": _find_holders(paths)})
+    return 0
+
+
 def cmd_status(paths, out, err):
     try:
         _, data, _ = _read_config(paths["config"])
         mode = data["mode"]
     except HelperError:
         mode = None
-    out.write(json.dumps({"configured_mode": mode,
-                          "dgpu_disable": _read_int(paths["dgpu_disable"]),
-                          "gpu_mux_mode": _read_int(paths["gpu_mux_mode"])}) + "\n")
+    mux = _read_int(paths["gpu_mux_mode"])
+    present = _find_nvidia(paths) is not None
+    _emit(out, {"configured_mode": mode,
+                "dgpu_disable": _read_int(paths["dgpu_disable"]),
+                "gpu_mux_mode": mux,
+                "holders": _find_holders(paths) if present else [],
+                "live_ready": mux == 1 and _rule61_present(paths)})
     return 0
 
 
@@ -213,31 +821,18 @@ def cmd_set(target_arg, paths, is_root, euid, out, err):
         return 5
     target = MODES[target_arg]
     try:
-        text, data, st = _read_config(paths["config"])
+        parsed = _read_config(paths["config"])
+        text, data, st = parsed
         if target == "Integrated" and _read_int(paths["gpu_mux_mode"]) == 0:
             err.write("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz / "
                       "Eco cannot be combined with dGPU-direct MUX mode\n")
             return 4
         eco_exit = (target == "Hybrid" and _read_int(paths["dgpu_disable"]) == 1
                     and _read_int(paths["gpu_mux_mode"]) != 0)
-        restore = None
-        if data["mode"] == target:
-            if not eco_exit:
-                out.write("değişiklik yok / no change\n")
-                return 0
-        else:
-            if len(_MODE_RE.findall(text)) != 1:
-                raise HelperError(6, "'mode' anahtarı belirsiz / ambiguous 'mode' key")
-            new_text = _MODE_RE.sub(lambda m: '%s"%s"' % (m.group(1), target), text, count=1)
-            new_data = json.loads(new_text)
-            expect = dict(data)
-            expect["mode"] = target
-            if new_data != expect or list(new_data) != list(data):
-                raise HelperError(6, "Doğrulama başarısız / verification failed")
-            real = (euid == 0)
-            _atomic_write(paths["backup"], text, 0o644, st.st_uid, st.st_gid, real)
-            _atomic_write(paths["config"], new_text, 0o644, st.st_uid, st.st_gid, real)
-            restore = lambda: _atomic_write(paths["config"], text, 0o644, st.st_uid, st.st_gid, real)
+        if data["mode"] == target and not eco_exit:
+            out.write("değişiklik yok / no change\n")
+            return 0
+        _, restore = _apply_mode(paths, target, euid, parsed)
         if eco_exit:
             code = _eco_exit_rest(paths, restore, err)
             if code:
@@ -264,6 +859,12 @@ def main(argv=None, environ=None, euid=None, out=None, err=None):
     paths, is_root = resolve_env(environ, euid)
     if len(argv) == 1 and argv[0] == "status":
         return cmd_status(paths, out, err)
+    if len(argv) == 1 and argv[0] == "holders":
+        return cmd_holders(paths, out, err)
+    if len(argv) == 1 and argv[0] == "live-eco":
+        return cmd_live_eco(paths, is_root, euid, out, err)
+    if len(argv) == 1 and argv[0] == "live-hybrid":
+        return cmd_live_hybrid(paths, is_root, euid, out, err)
     if len(argv) == 2 and argv[0] == "set-boot-mode" and argv[1] in MODES:
         return cmd_set(argv[1], paths, is_root, euid, out, err)
     err.write(USAGE)
