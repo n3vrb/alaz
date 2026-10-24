@@ -119,6 +119,8 @@ class Tray(QObject):
         state.accentChanged.connect(self._on_accent)
         state.sensorsChanged.connect(self._on_sensors)
         state.gfxChanged.connect(lambda _v: self._refresh_gfx())
+        if hasattr(controller, "gpuSwitchFailed"):
+            controller.gpuSwitchFailed.connect(self.notify_gpu_failure)
         state.auraChanged.connect(lambda _v: self._refresh_light())
         state.peripheralsChanged.connect(lambda _k, _v: self._refresh_info())
         self._refresh_light()
@@ -166,8 +168,8 @@ class Tray(QObject):
         self._heading(tr("GPU MODU"))
         self.gpu_group = QActionGroup(self.menu)
         self.gpu_actions: dict[str, QAction] = {}
-        for k, text in (("standard", GPU_LABEL["standard"]), ("eco", tr("Eco   (yeniden başlatma)"))):
-            a = self.menu.addAction(text)
+        for k in ("eco", "standard", "ultimate", "optimize"):
+            a = self.menu.addAction(GPU_LABEL[k])
             a.setCheckable(True)
             a.setActionGroup(self.gpu_group)
             a.triggered.connect(lambda _=False, key=k: self._gpu(key))
@@ -185,10 +187,9 @@ class Tray(QObject):
         self.act_quit.triggered.connect(self.quitRequested)
 
     def _gpu(self, key: str) -> None:
-        if key != self.state.gfx.active:
-            dialogs.request_gpu_mode(None, self.ctl, key, self.state.accent,
-                                     leaving_eco=(key == "standard" and self.state.gfx.active == "eco"))
-        self._refresh_gfx()  # restore the radio state; the real change only happens after reboot
+        from alaz.ui.windows.main_window import PERF_COLOR_GPU
+        dialogs.gpu_choose(None, self.ctl, self.state.gfx, key, PERF_COLOR_GPU.get(key, self.state.accent))
+        self._refresh_gfx()  # restore the radio state; the real change only happens after the switch / reboot
 
     def _activated(self, reason) -> None:
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
@@ -202,13 +203,33 @@ class Tray(QObject):
         self._refresh_info()
 
     def _refresh_gfx(self) -> None:
-        g = self.state.gfx.active
+        gv = self.state.gfx
+        g = gv.active
+        switching = bool(getattr(gv, "switching", False))
+        live = bool(getattr(gv, "live_ready", False))
+        mux = bool(gv.mux_direct)
+        shown = "optimize" if getattr(gv, "optimize", False) else (getattr(gv, "selected", None) or g)
+        if gv.pending or getattr(gv, "waiting", None):
+            shown = "optimize" if getattr(gv, "optimize", False) else g
         for k, a in self.gpu_actions.items():
-            a.setChecked(k == g)
+            a.setChecked(k == shown)
+            a.setEnabled(not switching and not (mux and k in ("eco", "optimize")))
+            text = GPU_LABEL[k]
+            if k in ("eco", "standard") and not live:
+                text += "   " + tr("(yeniden başlatma)")
+            elif k == "ultimate":
+                text += "   " + tr("(yeniden başlatma)")
+            if switching and k == shown:
+                text += "   " + tr("Geçiliyor…")
+            a.setText(text)
         if g != self._logo_mode:              # logo colour follows the active GPU mode
             self._logo_mode = g
             if self._icon_watts is None:
                 self.icon.setIcon(make_icon(self.state.accent, g))
+
+    def notify_gpu_failure(self, message: str, reboot_required: bool = False) -> None:
+        if self.icon.isVisible():
+            self.icon.showMessage("Alaz", message, QSystemTrayIcon.MessageIcon.Warning, 6000)
 
     def _refresh_light(self) -> None:
         br = self.state.aura.brightness

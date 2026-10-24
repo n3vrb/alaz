@@ -303,4 +303,46 @@ EN.update({
     '4 saat': '4 hours',
     '8 saat': '8 hours',
     'Bu modda kilitli': 'Locked in this mode',
+    # --- live GPU switching UI (P4)
+    'Geçiliyor…': 'Switching…',
+    'Optimize: pilde Eco, prizde Standart; geçiş otomatik.': 'Optimize: Eco on battery, Standard on AC; switches automatically.',
+    'Geçiş yeniden başlatınca uygulanır.': 'The change is applied after a reboot.',
+    'Ultimate modunda kullanılamaz': 'Not available in Ultimate mode',
+    '{name} için bekleniyor': 'Waiting to switch to {name}',
+    '{apps} kapanınca {name} moduna geçilecek.': 'Will switch to {name} once {apps} closes.',
+    'dGPU’yu kullanan uygulamalar kapanınca {name} moduna geçilecek.': 'Will switch to {name} once the apps using the dGPU close.',
+    'Ultimate moduna geç': 'Switch to Ultimate mode',
+    'Ultimate (MUX) modunda dahili ekran doğrudan NVIDIA dGPU’ya bağlanır; en yüksek oyun performansı budur. Geçiş için bilgisayarı yeniden başlatman GEREKİR.\n\nRisk: NVIDIA sürücüsü açılışta başarısız olursa iGPU’ya geri düşüş yoktur ve dahili ekran siyah kalır. Kurtarma: TTY’ye geç (Ctrl+Alt+F3) ya da Windows’taki G-Helper ile MUX’u geri al.\n\nUltimate modundayken Eco ve Optimize kullanılamaz.': 'In Ultimate (MUX) mode the internal display is wired directly to the NVIDIA dGPU, which gives the best gaming performance. Switching REQUIRES a reboot.\n\nRisk: if the NVIDIA driver fails at boot there is no fallback to the iGPU and the internal display stays black. Recovery: switch to a TTY (Ctrl+Alt+F3) or undo the MUX with G-Helper on Windows.\n\nEco and Optimize are unavailable while in Ultimate mode.',
+    'dGPU kullanımda': 'dGPU in use',
+    'Bilinmeyen uygulama': 'Unknown application',
+    'Bu uygulamalar dGPU’yu kullanıyor. Hiçbiri otomatik kapatılmayacak. Kapanınca geçilmesini bekleyebilir ya da geçişi bir sonraki yeniden başlatmaya bırakabilirsin.': 'These applications are using the dGPU. None of them will be closed automatically. You can wait for the switch until they close, or leave it for the next reboot.',
+    'Yeniden başlatınca uygula': 'Apply on reboot',
+    'Kapatınca geç': 'Switch when closed',
+    '(yeniden başlatma)': '(reboot)',
+    # live GPU switching (controller)
+    'Bir GPU geçişi sürüyor; bitmesini bekle.': 'A GPU switch is in progress; wait for it to finish.',
+    'Bir uygulama': 'An application',
+    'Canlı GPU geçişi için kurulum eksik (kurulum: sudo helper/install.sh): {msg}':
+        'Live GPU switching setup is incomplete (setup: sudo helper/install.sh): {msg}',
+    'GPU geçişi başlamadan durduruldu; hiçbir şey değişmedi. ({msg})':
+        'The GPU switch was aborted before it started; nothing changed. ({msg})',
+    'GPU geçişi yarıda kaldı ({msg}). Yapılandırma hedef moda ayarlı; yeniden başlatmak geçişi güvenle tamamlar.':
+        'The GPU switch stopped midway ({msg}). The configuration is already set to the target mode; '
+        'restarting completes the switch safely.',
+    'MUX değişikliği geri alındı.': 'The MUX change was reverted.',
+    'Optimize için canlı GPU geçişi gerekiyor; kurulu değil (kurulum: sudo helper/install.sh, MUX Hybrid olmalı).':
+        "Optimize needs live GPU switching, which isn't set up (setup: sudo helper/install.sh; MUX must be Hybrid).",
+    'Standart yeniden başlatınca etkin olacak.': 'Standard will take effect after a restart.',
+    'Ultimate yeniden başlatınca etkin olacak. Bilgisayarı yeniden başlatman gerekiyor.':
+        'Ultimate will take effect after a restart. You need to restart the computer.',
+    'Ultimate zaten etkin.': 'Ultimate is already active.',
+    "Ultimate'tan çıkış yeniden başlatınca etkin olacak. Bilgisayarı yeniden başlatman gerekiyor.":
+        'Leaving Ultimate will take effect after a restart. You need to restart the computer.',
+    'supergfxd durdurulamadı; GPU geçişi başlatılmadı. Hiçbir şey değişmedi.':
+        'Could not stop supergfxd; the GPU switch was not started. Nothing changed.',
+    "{app} dGPU kullanıyor; kapanınca Eco'ya geçilecek": '{app} is using the dGPU; will switch to Eco when it closes',
+    "{app} dGPU kullanıyor; kapanınca Standart'a geçilecek":
+        '{app} is using the dGPU; will switch to Standard when it closes',
+    '{name} moduna geçildi.': 'Switched to {name}.',
+    '{name} zaten etkin.': '{name} is already active.',
 })

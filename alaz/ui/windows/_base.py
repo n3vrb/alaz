@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QAbstractButton, QApplication, QFrame, QHBoxLayout,
 
 from alaz.i18n import TrMap, tr
 from alaz.ui import theme
-from alaz.ui.widgets._common import IconButton
+from alaz.ui.widgets._common import IconButton, make_button
 from alaz.ui.widgets.icons import draw_icon
 
 log = logging.getLogger(__name__)
@@ -359,14 +359,30 @@ class Toast(QFrame):
         self._lab.setWordWrap(True)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
-        lay.addWidget(self._lab)
+        lay.addWidget(self._lab, 1)
+        self._action = make_button("", "primary", theme.WARN_ACCENT, 28, 12, self)
+        self._action.hide()
+        self._action_cb = None
+        self._action.clicked.connect(self._run_action)
+        lay.addWidget(self._action)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
         self.hide()
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def show_message(self, level: str, text: str) -> None:
+    def _run_action(self) -> None:
+        cb, self._action_cb = self._action_cb, None
+        self.hide()
+        if cb is not None:
+            cb()
+
+    def show_message(self, level: str, text: str, action: tuple | None = None) -> None:
+        """action: optional (button text, callback); a toast with an action stays until dismissed."""
+        self._action_cb = action[1] if action else None
+        self._action.setVisible(bool(action))
+        if action:
+            self._action.setText(action[0])
         col = {"info": theme.TEXT2, "warn": theme.WARN_ACCENT, "error": "#FF5A5F"}.get(level, theme.TEXT2)
         self.setStyleSheet(f"QFrame#toast {{ background:{theme.CONTROL}; border:1px solid {col}; border-radius:10px; }}")
         self._lab.setStyleSheet(f"color:{theme.TEXT}; font-size:12.5px; background:transparent")
@@ -378,7 +394,7 @@ class Toast(QFrame):
         self.move(16, w.height() - self.height() - 16)
         self.show()
         self.raise_()
-        if level == "info":
+        if level == "info" and not action:
             self._timer.start(4000)
         else:
             self._timer.stop()

@@ -30,10 +30,14 @@ GPU_DESC = {
     "standard": "iGPU çizer, dGPU gerektiğinde uyanır.",
     "ultimate": "MUX: ekran doğrudan dGPU’ya bağlı. En yüksek oyun performansı.",
 }
+GPU_DESC_OPTIMIZE = "Optimize: pilde Eco, prizde Standart; geçiş otomatik."
+GPU_DESC_NEEDS_REBOOT = "Geçiş yeniden başlatınca uygulanır."
+GPU_MUX_LOCK = "Ultimate modunda kullanılamaz"
+GPU_SWITCHING = "Geçiliyor…"
+NOT_SUPPORTED = "Henüz desteklenmiyor"   # kept for the i18n table test; no tile uses it any more
 BAT_STATUS = {"Charging": "Şarj oluyor", "Discharging": "Boşalıyor", "Full": "Dolu", "Not charging": "Şarj olmuyor"}
 GPU_REBOOT_SUB = {"eco": "Açık işlerini kaydet. Harici monitör bu modda çalışmaz.",
                   "standard": "Açık işlerini kaydet. Geçiş açılışta uygulanır."}
-NOT_SUPPORTED = "Henüz desteklenmiyor"
 HZ_QUICK = (60, 120, 240)
 
 
@@ -110,8 +114,6 @@ class MainWindow(FramelessWindow):
                                     ("standard", GPU_LABEL["standard"], "layers", PERF_COLOR_GPU["standard"]),
                                     ("ultimate", GPU_LABEL["ultimate"], "chip", PERF_COLOR_GPU["ultimate"]),
                                     ("optimize", GPU_LABEL["optimize"], "refresh", PERF_COLOR_GPU["optimize"])])
-        self.gpu_row.set_enabled("ultimate", False, tr(NOT_SUPPORTED))
-        self.gpu_row.set_enabled("optimize", False, tr(NOT_SUPPORTED))
         self.gpu_row.clicked.connect(self._gpu_clicked)
         self.gpu_desc = label("", 12, 400, theme.TEXT2)
         self.pending = PendingCard()
@@ -119,6 +121,12 @@ class MainWindow(FramelessWindow):
         if hasattr(self.ctl, "gpuRebootRequired"):
             self.ctl.gpuRebootRequired.connect(self._eco_exit_reboot_prompt)
         self.pending.cancelClicked.connect(lambda: self.ctl.cancel_gpu_pending())
+        if hasattr(self.ctl, "gpuBusy"):
+            self.ctl.gpuBusy.connect(self._on_gpu_busy)
+        if hasattr(self.ctl, "gpuUltimateConfirm"):
+            self.ctl.gpuUltimateConfirm.connect(self._on_ultimate_confirm)
+        if hasattr(self.ctl, "gpuSwitchFailed"):
+            self.ctl.gpuSwitchFailed.connect(self._on_gpu_failed)
         self.pending.hide()
         lay.addLayout(self._section(self.gpu_header, self.gpu_row, self.gpu_desc, self.pending))
 
@@ -257,23 +265,64 @@ class MainWindow(FramelessWindow):
         return bool(g.pending == "standard" and g.active == "eco" and g.dgpu_disabled is False)
 
     def _pending_color(self) -> str:
-        p = self.state.gfx.pending
+        g = self.state.gfx
+        p = g.pending or getattr(g, "waiting", None)
         if self._reboot_required():
             return theme.WARN_ACCENT
         return PERF_COLOR_GPU.get(p, self._accent) if p else self._accent
 
     def _eco_exit_reboot_prompt(self) -> None:
         self._refresh_gfx()
-        dialogs.reboot_now(self, self.ctl, self._accent, after_eco_exit=True)
+        dialogs.reboot_now(self, self.ctl, self._accent, after_eco_exit=self._reboot_required())
+
+    # live GPU switching (P4): dialogs on controller signals
+    def _dialog_parent(self):
+        return self if self.isVisible() else None
+
+    def _on_gpu_busy(self, holders) -> None:
+        choice = dialogs.ask_busy(self._dialog_parent(), holders, self._accent)
+        self.ctl.resolve_busy(choice)
+
+    def _on_ultimate_confirm(self) -> None:
+        self.ctl.confirm_ultimate(bool(dialogs.confirm_ultimate(self._dialog_parent(), PERF_COLOR_GPU["ultimate"])))
+
+    def _on_gpu_failed(self, message: str, reboot_required: bool) -> None:
+        action = (tr("Yeniden başlat"), lambda: dialogs.reboot_now(self, self.ctl, self._accent)) \
+            if reboot_required else None
+        self.toast.show_message("error", message, action)
+
+    def _gpu_selected(self) -> str | None:
+        g = self.state.gfx
+        return getattr(g, "selected", None) or g.active
 
     def _refresh_gfx(self) -> None:
         g = self.state.gfx
+        switching = bool(getattr(g, "switching", False))
+        waiting = getattr(g, "waiting", None)
+        live = bool(getattr(g, "live_ready", False))
+        optimize = bool(getattr(g, "optimize", False))
+        # a queued target (waiting / reboot) is shown dashed on its tile; the check mark stays on what is in effect
+        selected = "optimize" if optimize else (g.active if (g.pending or waiting) else self._gpu_selected())
         self.gpu_header.set_value(tr("Etkin: {name}", name=strong(GPU_LABEL.get(g.active, "—") if g.active else "—")))
-        self.gpu_row.set_selected(g.active)
-        self.gpu_row.set_pending(g.pending)
+        self.gpu_row.set_selected(selected)
+        self.gpu_row.set_pending(g.pending or waiting)
+        self._apply_gpu_tiles()
         show_banner = bool(g.dgpu_disabled and g.active == "eco" and g.boot != "eco")
         self.banner.setVisible(show_banner)
-        if g.pending:
+        if waiting:
+            name = GPU_LABEL.get(waiting, waiting)
+            apps = ", ".join(dialogs.holder_names(getattr(g, "holders", None)))
+            self.pending.set_content(
+                tr("{name} için bekleniyor", name=name),
+                tr("{apps} kapanınca {name} moduna geçilecek.", apps=apps, name=name) if apps else
+                tr("dGPU’yu kullanan uygulamalar kapanınca {name} moduna geçilecek.", name=name))
+            self.pending.set_urgent(False)
+            self.pending.set_reboot_visible(False)
+            self.pending.set_accent(self._pending_color())
+            self.pending.set_color(self._pending_color())
+            self.pending.show()
+            self.gpu_desc.hide()
+        elif g.pending:
             name = GPU_LABEL.get(g.pending, g.pending)
             urgent = self._reboot_required()
             if urgent:
@@ -284,17 +333,40 @@ class MainWindow(FramelessWindow):
                 self.pending.set_content(tr("{name} yeniden başlatınca etkin olacak", name=name),
                                          tr(GPU_REBOOT_SUB.get(g.pending, "Açık işlerini kaydet.")))
             self.pending.set_urgent(urgent)
+            self.pending.set_reboot_visible(True)
             self.pending.set_accent(self._pending_color())
             self.pending.set_color(self._pending_color())
             self.pending.show()
             self.gpu_desc.hide()
         else:
             self.pending.hide()
-            desc = tr(GPU_DESC.get(g.active or "", ""))
-            if g.active == "standard":
-                desc += " " + tr("Şu an dGPU uykuda.") if g.power == "sleep" else ""
+            if switching:
+                desc = tr(GPU_SWITCHING)
+            elif optimize:
+                desc = tr(GPU_DESC_OPTIMIZE)
+            else:
+                desc = tr(GPU_DESC.get(g.active or "", ""))
+                if g.active in ("eco", "standard") and not live:
+                    desc += " " + tr(GPU_DESC_NEEDS_REBOOT)
+                if g.active == "standard" and g.power == "sleep":
+                    desc += " " + tr("Şu an dGPU uykuda.")
             self.gpu_desc.setText(desc)
             self.gpu_desc.show()
+
+    def _apply_gpu_tiles(self) -> None:
+        """Tile enabling rules: all four usable, except while switching (none) or in MUX direct (no eco/optimize)."""
+        g = self.state.gfx
+        switching = bool(getattr(g, "switching", False))
+        mux = bool(g.mux_direct)
+        busy = self.is_busy("gpu")
+        for k in self.gpu_row.keys():
+            tip = ""
+            ok = not (switching or busy)
+            if switching:
+                tip = tr(GPU_SWITCHING)
+            elif mux and k in ("eco", "optimize"):
+                ok, tip = False, tr(GPU_MUX_LOCK)
+            self.gpu_row.set_enabled(k, ok, tip)
 
     def _refresh_display(self) -> None:
         d = self.state.display
@@ -362,14 +434,7 @@ class MainWindow(FramelessWindow):
 
     # ------------------------------------------------------------------ actions
     def _gpu_clicked(self, key: str) -> None:
-        g = self.state.gfx
-        if key == g.active:
-            if g.pending:
-                self.ctl.cancel_gpu_pending()
-            return
-        if key in ("eco", "standard"):
-            dialogs.request_gpu_mode(self, self.ctl, key, PERF_COLOR_GPU[key],
-                                     leaving_eco=(key == "standard" and g.active == "eco"))
+        dialogs.gpu_choose(self, self.ctl, self.state.gfx, key, PERF_COLOR_GPU[key])
 
     def _hz_changed(self, key: str) -> None:
         self.ctl.set_refresh(None if key == "auto" else int(key))
@@ -387,8 +452,7 @@ class MainWindow(FramelessWindow):
         self._refresh_light()
         self.perf_row.setEnabled(not b("perf"))
         self.gpu_row.setEnabled(not b("gpu"))
-        self.gpu_row.set_enabled("ultimate", False, tr(NOT_SUPPORTED))
-        self.gpu_row.set_enabled("optimize", False, tr(NOT_SUPPORTED))
+        self._apply_gpu_tiles()
         self.pending.setEnabled(not b("gpu"))
         self.hz_seg.setEnabled(not b("refresh"))
         self.hz_more.setEnabled(not b("refresh"))

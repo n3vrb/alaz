@@ -140,12 +140,11 @@ def test_gpu_click_confirms_then_requests(env, monkeypatch):
     assert ("request_gpu_mode", ("eco",)) in ctl.calls
 
 
-def test_ultimate_optimize_disabled(env):
+def test_all_four_tiles_enabled_by_default(env):
     st, ctl, settings = env
     w = MainWindow(st, ctl, settings)
-    for k in ("ultimate", "optimize"):
-        assert not w.gpu_row.is_enabled(k)
-        assert w.gpu_row.tile(k).toolTip() == "Henüz desteklenmiyor"
+    for k in ("eco", "standard", "ultimate", "optimize"):
+        assert w.gpu_row.is_enabled(k), k
 
 
 def test_busy_disables_controls(env):
@@ -160,7 +159,7 @@ def test_busy_disables_controls(env):
         assert not widget.isEnabled(), key
         st.emit_busy(key, False)
         assert widget.isEnabled(), key
-    assert not w.gpu_row.is_enabled("ultimate")          # still unsupported after busy cycle
+    assert w.gpu_row.is_enabled("ultimate")              # per-tile rules are restored after a busy cycle
 
 
 def test_display_battery_od_controls(env):

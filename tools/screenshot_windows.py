@@ -101,6 +101,44 @@ def main() -> int:
     st.set_gfx(boot="standard", pending="standard", dgpu_disabled=False)
     snap(app, MainWindow(st, ctl, settings), out / "eco_exit_pending.png")
 
+    # live GPU switching states (P4)
+    from alaz.ui.windows._fake import FakeHolder
+    live_states = {
+        "gpu_live_standard": dict(live_ready=True),
+        "gpu_live_optimize": dict(live_ready=True, optimize=True, selected="optimize", active="eco", boot="eco"),
+        "gpu_live_switching": dict(live_ready=True, switching=True, selected="eco"),
+        "gpu_live_waiting": dict(live_ready=True, waiting="eco", selected="eco",
+                                 holders=[FakeHolder(), FakeHolder(pid=7, comm="steam", exe="/usr/bin/steam")]),
+        "gpu_live_ultimate_mux": dict(live_ready=True, active="ultimate", boot="ultimate", selected="ultimate",
+                                      mux_direct=True),
+    }
+    for name, kw in live_states.items():
+        st, ctl = make("balanced")
+        st.set_gfx(**kw)
+        theme.apply(app, st.accent)
+        snap(app, MainWindow(st, ctl, settings), out / f"{name}.png")
+    st, ctl = make("balanced")
+    st.set_gfx(live_ready=True)
+    theme.apply(app, st.accent)
+    w = MainWindow(st, ctl, settings)
+    w.show()
+    app.processEvents()
+    ctl.gpuSwitchFailed.emit("GPU geçişi yarıda kaldı (zaman aşımı). Yeniden başlatmak geçişi güvenle tamamlar.", True)
+    app.processEvents()
+    w.grab().save(str(out / "gpu_failure_toast.png"))
+    w.hide()
+    w.deleteLater()
+    for name, dlg in (("gpu_busy_dialog", dialogs.BusyDialog(None, ["blender", "steam", "firefox"],
+                                                              PERF_COLOR_GPU["eco"])),
+                      ("gpu_ultimate_dialog", dialogs.ConfirmDialog(None, tr(dialogs.ULTIMATE_TITLE),
+                                                                    tr(dialogs.ULTIMATE_TEXT), tr("Devam"),
+                                                                    tr("Vazgeç"), PERF_COLOR_GPU["ultimate"]))):
+        dlg.show()
+        app.processEvents()
+        dlg.grab().save(str(out / f"{name}.png"))
+        print("saved", out / f"{name}.png")
+        dlg.deleteLater()
+
     st, ctl = make("balanced")
     st.set_gfx(active="eco", boot="standard", dgpu_disabled=True)
     st.set_display(auto=False, current_hz=120)
@@ -149,6 +187,7 @@ def main() -> int:
     snap(app, SettingsWindow(st, ctl, settings, autostart_path=out / "autostart.desktop"), out / "settings.png")
     snap(app, MiniWindow(st, ctl), out / "mini.png")
 
+    st.set_gfx(live_ready=True, optimize=True, selected="optimize", active="eco", boot="eco", dgpu_disabled=True)
     tray = Tray(st, ctl, settings)
     # feed one snapshot so the header + live power line are filled (on battery, measured-like value)
     st.set_sensors(fake_sensors(battery_status="Discharging", on_ac=False, battery_power_w=12.4,

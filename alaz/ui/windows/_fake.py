@@ -45,6 +45,22 @@ class GfxView:
     dgpu_disabled: bool | None = False
     mux_direct: bool | None = False
     can_eco_exit: bool = True
+    # live switching (contract P3)
+    selected: str | None = None
+    switching: bool = False
+    waiting: str | None = None
+    holders: list = field(default_factory=list)
+    live_ready: bool = False
+    optimize: bool = False
+
+
+@dataclass
+class FakeHolder:
+    pid: int = 1234
+    comm: str = "blender"
+    user: str = "enes"
+    exe: str = "/usr/bin/blender"
+    nodes: list = field(default_factory=lambda: ["/dev/nvidia0"])
 
 
 @dataclass
@@ -196,6 +212,9 @@ class FakeState(QObject):
 
 class FakeController(QObject):
     gpuRebootRequired = pyqtSignal()
+    gpuBusy = pyqtSignal(list)
+    gpuSwitchFailed = pyqtSignal(str, bool)
+    gpuUltimateConfirm = pyqtSignal()
 
     def __init__(self, state: FakeState):
         super().__init__()
@@ -228,16 +247,32 @@ class FakeController(QObject):
 
     def request_gpu_mode(self, mode: str) -> None:
         self._rec("request_gpu_mode", mode)
-        leaving_eco = mode == "standard" and self.state.gfx.active == "eco"
+        g = self.state.gfx
+        if mode == "ultimate":
+            self.gpuUltimateConfirm.emit()
+            return
+        if mode == "optimize":
+            self.state.set_gfx(optimize=True, selected="optimize")
+            return
+        if g.live_ready:                       # live switch: instant in the fake
+            self.state.set_gfx(active=mode, boot=mode, selected=mode, optimize=False, pending=None, waiting=None)
+            return
+        leaving_eco = mode == "standard" and g.active == "eco"
         if leaving_eco:
-            self.state.set_gfx(boot=mode, pending=mode, dgpu_disabled=False)
+            self.state.set_gfx(boot=mode, pending=mode, dgpu_disabled=False, optimize=False)
             self.gpuRebootRequired.emit()
             return
-        self.state.set_gfx(boot=mode, pending=mode if mode != self.state.gfx.active else None)
+        self.state.set_gfx(boot=mode, optimize=False, pending=mode if mode != g.active else None)
+
+    def resolve_busy(self, choice: str) -> None:
+        self._rec("resolve_busy", choice)
+
+    def confirm_ultimate(self, ok: bool) -> None:
+        self._rec("confirm_ultimate", ok)
 
     def cancel_gpu_pending(self) -> None:
         self._rec("cancel_gpu_pending")
-        self.state.set_gfx(boot=self.state.gfx.active, pending=None)
+        self.state.set_gfx(boot=self.state.gfx.active, pending=None, waiting=None)
 
     def reboot_now(self) -> None:
         self._rec("reboot_now")

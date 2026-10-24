@@ -227,3 +227,31 @@ def test_language_setting_is_stored_and_applies_after_restart(tmp_path):
     se.lang_seg.set_current("auto", emit=True)
     assert settings.value(i18n.KEY_LANGUAGE) == "auto" and se.lang_note.text() == ""
     assert SettingsWindow(st, ctl, settings, autostart_path=tmp_path / "b.desktop").lang_seg.current() == "auto"
+
+
+def test_live_gpu_ui_english():
+    from alaz.ui.windows._fake import FakeHolder
+    st, ctl = make("balanced")
+    st.set_gfx(live_ready=True)
+    w = MainWindow(st, ctl, QSettings())
+    t = Tray(st, ctl, QSettings())
+    w.show()
+    for kw in (dict(), dict(optimize=True, selected="optimize"), dict(switching=True),
+               dict(switching=False, waiting="eco", holders=[FakeHolder()]),
+               dict(waiting=None, active="ultimate", mux_direct=True, optimize=False),
+               dict(live_ready=False, active="standard", mux_direct=False)):
+        st.set_gfx(**kw)
+        pump()
+        assert_english(visible_texts(w), f"main/live {kw}")
+        assert_english([a.text() for a in t.menu.actions()], f"tray/live {kw}")
+    ctl.gpuSwitchFailed.emit("Switch failed", True)
+    assert_english(visible_texts(w), "main/failure toast")
+    for dlg in (dialogs.BusyDialog(None, ["blender"]),
+                dialogs.ConfirmDialog(None, i18n.tr(dialogs.ULTIMATE_TITLE), i18n.tr(dialogs.ULTIMATE_TEXT),
+                                      i18n.tr("Devam"), i18n.tr("Vazgeç"))):
+        dlg.show()
+        pump()
+        assert_english(visible_texts(dlg), "live dialogs")
+        dlg.close()
+    assert "Switch when closed" in dialogs.BusyDialog(None, []).wait_btn.text()
+    w.hide()

@@ -135,6 +135,10 @@ class PendingCard(_Frame, AccentMixin):
     def set_reboot_enabled(self, on: bool) -> None:
         self._reboot.setEnabled(on)
 
+    def set_reboot_visible(self, on: bool) -> None:
+        """Hidden while only waiting for apps to close (nothing to reboot for)."""
+        self._reboot.setVisible(on)
+
     def set_urgent(self, on: bool) -> None:
         """Warning tone: reboot is required (no way to cancel)."""
         self._cancel.setVisible(not on)
