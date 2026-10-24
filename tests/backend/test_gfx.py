@@ -291,3 +291,187 @@ def test_request_boot_mode_stores_exit_code():
     c.request_boot_mode(GfxMode.HYBRID, lambda ok, msg: seen.append(c.last_exit_code))
     FakeProcess.instances[0].finished.slots[0](126, None)
     assert seen == [126]
+
+
+# ------------------------------------------------------------------ live switch
+import json as _json
+
+from alaz.backend.gfx import Holder, LiveResult, parse_live_result
+
+
+def _live_client():
+    FakeProcess.instances.clear()
+    c = GfxClient()
+    c.process_factory = FakeProcess
+    return c
+
+
+@pytest.mark.parametrize("mode,arg", [(GfxMode.INTEGRATED, "live-eco"), (GfxMode.HYBRID, "live-hybrid")])
+def test_request_live_command_line_and_ok(mode, arg):
+    c = _live_client()
+    results = []
+    c.request_live(mode, results.append)
+    proc = FakeProcess.instances[0]
+    assert proc.started == ("pkexec", ["/usr/local/libexec/alaz-gfx-helper", arg])
+    proc.out = b'log line\n{"ok": true, "mode": "Integrated", "changed": true}\n'
+    proc.finished.slots[0](0, None)
+    proc.finished.slots[0](0, None)          # second finish ignored
+    assert len(results) == 1 and results[0].ok and results[0].code == 0 and results[0].error is None
+    assert c._live_process is None and c.last_exit_code == 0
+
+
+def test_request_live_busy_parses_holders():
+    c = _live_client()
+    results = []
+    c.request_live(GfxMode.INTEGRATED, results.append)
+    proc = FakeProcess.instances[0]
+    h = {"pid": 7, "comm": "firefox", "user": "enes", "exe": "/usr/bin/firefox", "nodes": ["/dev/nvidia0"]}
+    proc.out = (_json.dumps({"ok": False, "error": "busy", "holders": [h]}) + "\n").encode()
+    proc.finished.slots[0](9, None)
+    r = results[0]
+    assert not r.ok and r.code == 9 and r.error == "busy" and not r.reboot_required
+    assert r.holders == [Holder(7, "firefox", "enes", "/usr/bin/firefox", ["/dev/nvidia0"])]
+
+
+@pytest.mark.parametrize("code,out,error,reboot", [
+    (4, '{"ok": false, "error": "mux"}', "mux", False),
+    (7, '{"ok": false, "error": "supergfxd"}', "supergfxd", False),
+    (10, '{"ok": false, "error": "failed", "step": "pci", "reboot_required": true}', "failed", True),
+    (10, "", "failed", True),                                   # no JSON: code alone decides
+    (11, '{"ok": false, "error": "precondition", "missing": ["rule61"]}', "precondition", False),
+    (12, '{"ok": false, "error": "aborted", "step": "modprobe"}', "aborted", False),
+    (126, "", "cancelled", False),
+    (127, "", "unavailable", False),
+    (3, "garbage", "failed", False),
+])
+def test_parse_live_result_codes(code, out, error, reboot):
+    r = parse_live_result(code, out, "err text\n")
+    assert r.ok is False and r.code == code and r.error == error and r.reboot_required is reboot
+    assert r.message
+
+
+def test_parse_live_result_message_details():
+    r = parse_live_result(11, '{"ok": false, "error": "precondition", "missing": ["rule61"]}', "")
+    assert "rule61" in r.message
+    r = parse_live_result(12, '{"ok": false, "error": "aborted", "step": "modprobe"}', "stderr\n")
+    assert "modprobe" in r.message and "stderr" in r.message
+
+
+def test_parse_live_result_ok_unchanged_and_garbage_holders():
+    assert parse_live_result(0, '{"ok": true, "mode": "Hybrid", "changed": false}', "").ok
+    assert parse_live_result(0, "", "").ok                       # exit 0 without JSON still counts
+    r = parse_live_result(9, '{"error": "busy", "holders": [1, {"pid": "x"}, {"pid": 3, "comm": "a"}]}', "")
+    assert r.holders == [Holder(3, "a", "", None, [])]
+
+
+def test_request_live_is_one_at_a_time_and_blocks_boot_request():
+    c = _live_client()
+    results = []
+    c.request_live(GfxMode.INTEGRATED, results.append)
+    c.request_live(GfxMode.HYBRID, results.append)
+    assert len(FakeProcess.instances) == 1 and results[0].ok is False and results[0].error == "running"
+    done = []
+    c.request_boot_mode(GfxMode.HYBRID, lambda ok, m: done.append(ok))
+    assert len(FakeProcess.instances) == 1 and done == [False]
+
+
+@pytest.mark.parametrize("mode", [GfxMode.VFIO, GfxMode.ASUS_MUX_DGPU, 42])
+def test_request_live_rejects_unsupported(mode):
+    c = _live_client()
+    results = []
+    c.request_live(mode, results.append)
+    assert FakeProcess.instances == [] and results[0].ok is False
+
+
+def test_request_live_failed_to_start():
+    from PyQt6.QtCore import QProcess
+
+    c = _live_client()
+    results = []
+    c.request_live(GfxMode.HYBRID, results.append)
+    FakeProcess.instances[0].errorOccurred.slots[0](QProcess.ProcessError.FailedToStart)
+    assert results[0].error == "start" and results[0].code is None and c._live_process is None
+
+
+def test_request_live_callback_exception_is_contained():
+    c = _live_client()
+
+    def boom(_r):
+        raise RuntimeError("x")
+
+    c.request_live(GfxMode.HYBRID, boom)
+    FakeProcess.instances[0].finished.slots[0](0, None)
+    assert c._live_process is None
+
+
+def test_request_live_real_qprocess_with_stub_helper(tmp_path):
+    stub = tmp_path / "helper"
+    stub.write_text('#!/bin/sh\necho progress >&2\necho \'{"ok": false, "error": "busy", "holders": '
+                    '[{"pid": 1, "comm": "x", "user": "u", "exe": null, "nodes": []}]}\'\nexit 9\n')
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    c = GfxClient(helper_path=str(stub))
+    c.launcher = []
+    results = []
+    c.request_live(GfxMode.INTEGRATED, results.append)
+    assert spin_until(lambda: bool(results))
+    assert results[0].error == "busy" and results[0].holders[0].comm == "x" and results[0].holders[0].exe is None
+
+
+# --------------------------------------------------------------------- holders
+def test_query_holders_runs_without_pkexec():
+    c = _live_client()
+    got = []
+    c.query_holders(got.append)
+    proc = FakeProcess.instances[0]
+    assert proc.started == ("/usr/local/libexec/alaz-gfx-helper", ["holders"])
+    proc.out = b'{"ok": true, "dgpu_present": true, "holders": [{"pid": 5, "comm": "blender", "user": "u", "exe": null, "nodes": ["/dev/nvidia0"]}]}\n'
+    proc.finished.slots[0](0, None)
+    assert got == [[Holder(5, "blender", "u", None, ["/dev/nvidia0"])]] and c._holders_process is None
+
+
+def test_query_holders_shares_one_inflight_query():
+    c = _live_client()
+    a, b = [], []
+    c.query_holders(a.append)
+    c.query_holders(b.append)
+    assert len(FakeProcess.instances) == 1
+    FakeProcess.instances[0].out = b'{"ok": true, "dgpu_present": false, "holders": []}'
+    FakeProcess.instances[0].finished.slots[0](0, None)
+    assert a == [[]] and b == [[]]
+
+
+@pytest.mark.parametrize("code,out", [(5, ""), (0, "not json"), (0, '{"ok": false}')])
+def test_query_holders_failure_gives_empty_list(code, out):
+    c = _live_client()
+    got = []
+    c.query_holders(got.append)
+    FakeProcess.instances[0].out = out.encode()
+    FakeProcess.instances[0].finished.slots[0](code, None)
+    assert got == [[]]
+    c.query_holders(got.append)                   # a new query can start afterwards
+    assert len(FakeProcess.instances) == 2
+
+
+def test_query_holders_failed_to_start():
+    from PyQt6.QtCore import QProcess
+
+    c = _live_client()
+    got = []
+    c.query_holders(got.append)
+    FakeProcess.instances[0].errorOccurred.slots[0](QProcess.ProcessError.FailedToStart)
+    assert got == [[]]
+
+
+# ------------------------------------------------------------------ live_ready
+def test_live_ready_needs_mux1_and_rule(tmp_path):
+    mux, rule = tmp_path / "mux", tmp_path / "61.rules"
+    c = GfxClient(mux_path=str(mux), mutter_rule_path=str(rule))
+    assert c.live_ready() is False                      # nothing exists
+    mux.write_text("1\n")
+    assert c.live_ready() is False                      # rule missing
+    rule.write_text("x")
+    assert c.live_ready() is True
+    mux.write_text("0\n")
+    assert c.live_ready() is False                      # Ultimate
+    mux.write_text("garbage")
+    assert c.live_ready() is False

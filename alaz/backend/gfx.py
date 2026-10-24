@@ -1,15 +1,16 @@
-"""supergfxd client: read-only D-Bus access plus an async pkexec helper call.
+"""supergfxd client: read-only D-Bus access plus async pkexec helper calls.
 
-This module never changes the GPU mode live.  supergfxd's mode-changing
-methods are deliberately not used anywhere; a boot-time mode change goes
-through the root helper (``request_boot_mode``) and takes effect only after a
-reboot.
+supergfxd's own mode-changing D-Bus methods are deliberately not used anywhere.  A boot-time mode change goes through the root helper
+(``request_boot_mode``, effective after a reboot); a LIVE Eco<->Hybrid switch goes
+through the helper's ``live-eco`` / ``live-hybrid`` commands (``request_live``),
+which are only offered when ``live_ready()`` (see docs/LIVE_GPU_CONTRACT.md).
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from PyQt6.QtCore import QObject, QProcess, pyqtSignal
@@ -28,6 +29,8 @@ HELPER_PATH = "/usr/local/libexec/alaz-gfx-helper"
 SUPERGFXD_CONF = "/etc/supergfxd.conf"
 SYSFS_DGPU_DISABLE = "/sys/devices/platform/asus-nb-wmi/dgpu_disable"
 PCI_DEVICES = "/sys/bus/pci/devices"
+SYSFS_MUX = "/sys/devices/platform/asus-nb-wmi/gpu_mux_mode"
+MUTTER_RULE = "/etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules"
 
 NVIDIA_VENDOR = 0x10DE
 PCI_CLASS_DISPLAY = 0x03
@@ -43,6 +46,82 @@ _CONF_MODE_NAMES = {
     "None": GfxMode.NONE,
 }
 _HELPER_ARGS = {GfxMode.INTEGRATED: "integrated", GfxMode.HYBRID: "hybrid"}
+
+
+@dataclass
+class Holder:
+    """A process that holds the dGPU open (helper ``holders`` / busy answer)."""
+    pid: int
+    comm: str
+    user: str = ""
+    exe: str | None = None
+    nodes: list = field(default_factory=list)
+
+
+@dataclass
+class LiveResult:
+    ok: bool
+    code: int | None = None          # process exit code (None: never ran)
+    error: str | None = None         # helper "error" key, or "cancelled" (126) / "unavailable" (127) / "start"
+    holders: list = field(default_factory=list)
+    reboot_required: bool = False
+    message: str = ""
+
+
+_LIVE_ARGS = {GfxMode.INTEGRATED: "live-eco", GfxMode.HYBRID: "live-hybrid"}
+_CODE_ERRORS = {
+    4: "mux", 7: "supergfxd", 9: "busy", 10: "failed", 11: "precondition", 12: "aborted",
+    126: "cancelled", 127: "unavailable",
+}
+
+
+def _parse_holders(raw) -> list[Holder]:
+    out: list[Holder] = []
+    for h in raw if isinstance(raw, list) else []:
+        if not isinstance(h, dict):
+            continue
+        try:
+            out.append(Holder(
+                pid=int(h.get("pid", 0)), comm=str(h.get("comm", "")), user=str(h.get("user", "")),
+                exe=(str(h["exe"]) if h.get("exe") else None),
+                nodes=[str(n) for n in (h.get("nodes") or [])],
+            ))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _last_json(text: str) -> dict | None:
+    """The helper prints one JSON object as the LAST stdout line."""
+    for line in reversed(text.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return None
+        return obj if isinstance(obj, dict) else None
+    return None
+
+
+def parse_live_result(code: int | None, out: str, err: str) -> LiveResult:
+    """Map helper exit code + output to a LiveResult (contract table, P1)."""
+    data = _last_json(out) or {}
+    holders = _parse_holders(data.get("holders"))
+    error = data.get("error") if isinstance(data.get("error"), str) else None
+    if code == 0:
+        return LiveResult(ok=bool(data.get("ok", True)), code=0, holders=holders,
+                          message=str(data.get("mode") or "ok"))
+    if error is None:
+        error = _CODE_ERRORS.get(code, "failed") if code is not None else "start"
+    reboot = bool(data.get("reboot_required")) or code == 10
+    message = (err.strip().splitlines()[-1] if err.strip() else "") or out.strip() or f"helper exited with code {code}"
+    if data.get("missing"):
+        message = f"{message} ({', '.join(str(m) for m in data['missing'])})"
+    if data.get("step"):
+        message = f"{message} [{data['step']}]"
+    return LiveResult(ok=False, code=code, error=error, holders=holders, reboot_required=reboot, message=message)
 
 
 def _enum_or_none(enum_cls, value):
@@ -75,6 +154,8 @@ class GfxClient(QObject):
         dgpu_disable_path: str = SYSFS_DGPU_DISABLE,
         pci_root: str = PCI_DEVICES,
         helper_path: str = HELPER_PATH,
+        mux_path: str = SYSFS_MUX,
+        mutter_rule_path: str = MUTTER_RULE,
     ):
         super().__init__(parent)
         self._bus = bus if bus is not None else QDBusConnection.systemBus()
@@ -82,6 +163,8 @@ class GfxClient(QObject):
         self.dgpu_disable_path = dgpu_disable_path
         self.pci_root = pci_root
         self.helper_path = helper_path
+        self.mux_path = mux_path
+        self.mutter_rule_path = mutter_rule_path
         # Command prefix and process class are attributes so tests can substitute them.
         self.launcher: list[str] = ["pkexec"]
         self.process_factory: Callable[..., QProcess] = QProcess
@@ -95,6 +178,9 @@ class GfxClient(QObject):
         self.vendor: str | None = None
         self.version: str | None = None
         self._process: QProcess | None = None
+        self._live_process: QProcess | None = None
+        self._holders_process: QProcess | None = None
+        self._holders_waiters: list[Callable[[list], None]] = []
 
         # Any notification just triggers a cheap re-read; Mode()/Power() stay authoritative.
         self._subs = [
@@ -199,6 +285,10 @@ class GfxClient(QObject):
             return text == "1"
         return None
 
+    def live_ready(self) -> bool:
+        """Live Eco<->Hybrid switching is safe: MUX=1 and the mutter-ignore rule (61) is installed."""
+        return _read_text(self.mux_path) == "1" and os.path.exists(self.mutter_rule_path)
+
     def nvidia_pci_path(self) -> str | None:
         """Sysfs path of the NVIDIA display device (vendor 0x10de, class 0x03xxxx), if present."""
         try:
@@ -233,7 +323,7 @@ class GfxClient(QObject):
         except (KeyError, ValueError):
             callback(False, f"unsupported boot mode: {mode!r}")
             return
-        if self._process is not None:
+        if self._process is not None or self._live_process is not None:
             callback(False, "another mode request is already running")
             return
 
@@ -269,4 +359,94 @@ class GfxClient(QObject):
         proc.finished.connect(on_finished)
         proc.errorOccurred.connect(on_error)
         log.info("requesting boot mode %s via %s", arg, cmd[0])
+        proc.start(cmd[0], cmd[1:])
+
+
+    # ------------------------------------------------------------ live switch
+    def request_live(self, target: GfxMode, callback: Callable[[LiveResult], None]) -> None:
+        """Run ``pkexec <helper> live-eco|live-hybrid`` (10-15 s) asynchronously.
+
+        ``callback(LiveResult)`` is invoked exactly once.  One request at a time.  The last stdout line
+        is parsed as JSON; exit codes are mapped per the contract (docs/LIVE_GPU_CONTRACT.md, P1).
+        """
+        self.last_exit_code = None
+        try:
+            arg = _LIVE_ARGS[GfxMode(target)]
+        except (KeyError, ValueError):
+            callback(LiveResult(False, error="unsupported", message=f"unsupported live target: {target!r}"))
+            return
+        if self._live_process is not None or self._process is not None:
+            callback(LiveResult(False, error="running", message="another mode request is already running"))
+            return
+
+        cmd = [*self.launcher, self.helper_path, arg]
+        proc = self.process_factory(self)
+        self._live_process = proc
+        state = {"done": False}
+
+        def finish(result: LiveResult) -> None:
+            if state["done"]:
+                return
+            state["done"] = True
+            self._live_process = None
+            proc.deleteLater()
+            try:
+                callback(result)
+            except Exception:
+                log.exception("request_live callback raised")
+
+        def on_finished(code, _status) -> None:
+            self.last_exit_code = int(code)
+            out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            err = bytes(proc.readAllStandardError()).decode("utf-8", "replace")
+            finish(parse_live_result(int(code), out, err))
+
+        def on_error(error) -> None:
+            if error == QProcess.ProcessError.FailedToStart:
+                finish(LiveResult(False, error="start", message=f"could not start {cmd[0]}"))
+
+        proc.finished.connect(on_finished)
+        proc.errorOccurred.connect(on_error)
+        log.info("requesting live switch %s via %s", arg, cmd[0])
+        proc.start(cmd[0], cmd[1:])
+
+    def query_holders(self, callback: Callable[[list], None]) -> None:
+        """Run ``<helper> holders`` (no pkexec, read-only) asynchronously; callback gets [Holder] ([] on failure)."""
+        self._holders_waiters.append(callback)
+        if self._holders_process is not None:
+            return                      # a query is in flight: share its answer
+        cmd = [self.helper_path, "holders"]
+        proc = self.process_factory(self)
+        self._holders_process = proc
+        state = {"done": False}
+
+        def finish(holders: list[Holder]) -> None:
+            if state["done"]:
+                return
+            state["done"] = True
+            self._holders_process = None
+            proc.deleteLater()
+            waiters, self._holders_waiters = self._holders_waiters, []
+            for cb in waiters:
+                try:
+                    cb(list(holders))
+                except Exception:
+                    log.exception("query_holders callback raised")
+
+        def on_finished(code, _status) -> None:
+            out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            data = _last_json(out) if code == 0 else None
+            if data is None or not data.get("ok", False):
+                log.warning("helper holders failed (code %s)", code)
+                finish([])
+            else:
+                finish(_parse_holders(data.get("holders")))
+
+        def on_error(error) -> None:
+            if error == QProcess.ProcessError.FailedToStart:
+                log.warning("could not start %s", cmd[0])
+                finish([])
+
+        proc.finished.connect(on_finished)
+        proc.errorOccurred.connect(on_error)
         proc.start(cmd[0], cmd[1:])

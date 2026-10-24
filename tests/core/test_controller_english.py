@@ -20,7 +20,7 @@ def env(tmp_path):
 def test_gpu_messages_english(env):
     i18n.set_language("en")
     env.ctl.start()
-    env.ctl.request_gpu_mode("ultimate")
+    env.ctl.request_gpu_mode("bogus")
     assert env.msgs[-1] == ("warn", "This GPU mode isn't supported yet.")
     env.ctl.request_gpu_mode("eco")
     assert env.msgs[-1] == ("info", "Eco will take effect after restart.")
@@ -61,5 +61,5 @@ def test_validation_messages_english(env):
 
 def test_turkish_still_default_in_tr_mode(env):
     env.ctl.start()
-    env.ctl.request_gpu_mode("ultimate")
+    env.ctl.request_gpu_mode("bogus")
     assert env.msgs[-1] == ("warn", "Bu GPU modu henüz desteklenmiyor.")

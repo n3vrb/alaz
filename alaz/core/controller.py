@@ -57,6 +57,13 @@ K_CUSTOM_ACTIVE = "perf/custom_active"
 K_PL = ("custom/pl1", "custom/pl2", "custom/fppt")
 K_AUTO_REFRESH = "display/auto_refresh"
 K_KBD_LAST = "kbd/last_level"
+K_GPU_OPTIMIZE = "gpu/optimize"
+OPT_DEBOUNCE_MS = 5000          # Optimize: AC<->battery must be stable this long before switching
+HOLDER_POLL_MS = 5000           # waiting for the dGPU to be released: poll interval
+POST_SWITCH_REFRESH_MS = 3000   # supergfxd restarts during a switch: re-read after this
+SWITCH_HINT_MS = 20000          # how long the expected mode masks a stale supergfxd answer
+_LIVE_TARGET = {"eco": GfxMode.INTEGRATED, "standard": GfxMode.HYBRID}
+_MODES = ("eco", "standard", "optimize", "ultimate")
 K_AURA = "aura_sync/"
 AURA_DEBOUNCE_MS = 300
 MONITOR_BUSY_TIMEOUT_MS = 20_000
@@ -97,6 +104,12 @@ def _helper_exit_code(message: str) -> int | None:
 class Controller(QObject):
     # Emitted after a successful Eco exit: the dGPU is back and a reboot is REQUIRED NOW.
     gpuRebootRequired = pyqtSignal()
+    # The dGPU is held by processes: UI asks wait / reboot / cancel (-> resolve_busy). Payload: [Holder].
+    gpuBusy = pyqtSignal(list)
+    # A GPU switch failed: (message, reboot_required).
+    gpuSwitchFailed = pyqtSignal(str, bool)
+    # The user picked Ultimate: UI shows the risk dialog and answers with confirm_ultimate(bool).
+    gpuUltimateConfirm = pyqtSignal()
 
     def __init__(
         self,
@@ -131,6 +144,34 @@ class Controller(QObject):
         self._auto_refresh = settings.value(K_AUTO_REFRESH, False, type=bool)
         self._auto_pending = False           # auto-refresh wants to apply once a fresh display state arrives
         self._on_ac: bool | None = None
+        # GPU switching / Optimize state (see the "GPU" section)
+        self._optimize = settings.value(K_GPU_OPTIMIZE, False, type=bool)
+        self._switching = False
+        self._waiting: str | None = None
+        self._holders: list = []
+        self._busy_target: str | None = None       # live switch refused as busy; waiting for resolve_busy()
+        self._selected_hint: str | None = None
+        self._expect_active: str | None = None     # target of a finished live switch until supergfxd agrees
+        self._opt_apply_pending = False
+        self._poll_inflight = False
+        self._mux_pending: int | None = None       # MUX value written this session (effective after reboot)
+        self._mux_orig: int | None = None          # MUX value before that write
+        self._mux_prev: tuple | None = None
+        self._opt_timer = QTimer(self)
+        self._opt_timer.setSingleShot(True)
+        self._opt_timer.setInterval(OPT_DEBOUNCE_MS)
+        self._opt_timer.timeout.connect(self._optimize_apply)
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(HOLDER_POLL_MS)
+        self._poll_timer.timeout.connect(self._poll_holders)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(POST_SWITCH_REFRESH_MS)
+        self._refresh_timer.timeout.connect(lambda: self.gfx.refresh())
+        self._hint_timer = QTimer(self)
+        self._hint_timer.setSingleShot(True)
+        self._hint_timer.setInterval(SWITCH_HINT_MS)
+        self._hint_timer.timeout.connect(self._drop_switch_hint)
         self._display_state: Any = None
         self._refresh_busy = False
         # A persisted custom flag is only trusted once the firmware state confirms it (policy PERFORMANCE and the
@@ -161,6 +202,12 @@ class Controller(QObject):
         self.gfx.powerChanged.connect(lambda _p: self._rebuild_gfx())
         if hasattr(self.gfx, "pendingChanged"):
             self.gfx.pendingChanged.connect(lambda *_a: self._rebuild_gfx())
+        if hasattr(self.gfx, "availableChanged"):
+            # supergfxd vanishes and reappears during a live switch: just re-read, never an error
+            self.gfx.availableChanged.connect(lambda _a: self._rebuild_gfx())
+        if self._optimize and self._read_mux_direct():
+            self._optimize = False           # Optimize cannot run in Ultimate (dGPU direct)
+            self.settings.setValue(K_GPU_OPTIMIZE, False)
         self.sensors.updated.connect(self._on_sensors)
         self.display.changed.connect(self._on_display)
         self.display.error.connect(self._on_display_error)
@@ -197,6 +244,10 @@ class Controller(QObject):
             QTimer.singleShot(0, lambda: self.state.emit_busy(key, False))
 
     def _on_asusd_error(self, op: str, msg: str) -> None:
+        if op.endswith("GpuMuxMode") and getattr(self, "_mux_prev", None) is not None:
+            self._mux_pending, self._mux_orig = self._mux_prev     # the write failed: nothing pending
+            self._mux_prev = None
+            self._rebuild_gfx()
         if op.endswith("ThrottleThermalPolicy") and self._custom_flag:
             # the policy write behind "custom" failed: custom is not in effect
             log.warning("policy write failed; clearing custom flag")
@@ -330,35 +381,370 @@ class Controller(QObject):
     def _rebuild_gfx(self) -> None:
         mode = getattr(self.gfx, "mode", None)
         active = _GFX_TO_VIEW.get(mode) if mode is not None else None
+        if self._expect_active is not None:
+            if active == self._expect_active:
+                self._drop_switch_hint(rebuild=False)
+            else:
+                active = self._expect_active      # supergfxd restarting / not yet updated
         boot_mode = self.gfx.configured_boot_mode()
         boot = _GFX_TO_VIEW.get(boot_mode) if boot_mode is not None else None
         pending = boot if (boot is not None and active is not None and boot != active) else None
+        if self._switching:
+            # the helper writes the boot config first; until it finishes boot != active is expected,
+            # not a "reboot to complete" state (it looked exactly like a half-done Eco exit)
+            pending = None
         snap = self.state.sensors
         if snap is not None and getattr(snap, "gpu_state", "unknown") != "unknown":
             power = snap.gpu_state
         else:
             gp = getattr(self.gfx, "power", None)
             power = _POWER_TO_STR.get(gp, "unknown") if gp is not None else "unknown"
+        mux_direct = self._read_mux_direct()
+        if self._mux_pending == 0:
+            mux_direct = True
+        live_fn = getattr(self.gfx, "live_ready", None)
+        live_ready = bool(live_fn()) if callable(live_fn) else False
+        if self._optimize:
+            selected = "optimize"
+        elif self._selected_hint is not None and self._selected_hint != active:
+            selected = self._selected_hint
+        else:
+            self._selected_hint = None
+            selected = active
         self.state.set_gfx(GfxView(
             active=active, boot=boot, pending=pending, power=power,
             dgpu_disabled=self.gfx.dgpu_disabled(),
-            mux_direct=self._read_mux_direct(),
+            mux_direct=mux_direct,
             can_eco_exit=True,
+            selected=selected,
+            switching=self._switching,
+            waiting=self._waiting,
+            holders=list(self._holders),
+            live_ready=live_ready,
+            optimize=self._optimize,
         ))
+        if (self._opt_apply_pending and self._optimize and not self._switching
+                and active is not None and self._on_ac is not None):
+            self._opt_apply_pending = False
+            self._optimize_apply()
 
+    def _drop_switch_hint(self, rebuild: bool = True) -> None:
+        self._expect_active = None
+        self._hint_timer.stop()
+        if rebuild:
+            self.gfx.refresh()
+            self._rebuild_gfx()
+
+    # --- helpers for the MUX state ------------------------------------------------------
+    def _hw_direct(self) -> bool:
+        """The hardware is dGPU-direct NOW (Ultimate), whatever was written for the next boot."""
+        return bool(self._read_mux_direct()) or self.state.gfx.active == "ultimate"
+
+    def _chosen_direct(self) -> bool:
+        """Ultimate is what the machine will boot into (pending write wins over the current state)."""
+        return (self._mux_pending == 0) if self._mux_pending is not None else self._hw_direct()
+
+    def _live_possible(self) -> bool:
+        live_fn = getattr(self.gfx, "live_ready", None)
+        return (callable(live_fn) and bool(live_fn()) and not self._hw_direct()
+                and self._mux_pending is None and self.state.gfx.active in _LIVE_TARGET)
+
+    def _warn_ultimate_blocks(self) -> None:
+        self.state.emit_message(
+            "warn", tr("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz. "
+                       "Önce Ultimate modundan çıkılmalı."))
+
+    # --- public API ---------------------------------------------------------------------
     def request_gpu_mode(self, mode: str) -> None:
-        if mode not in _VIEW_TO_GFX:
+        if mode not in _MODES:
             self.state.emit_message("warn", tr("Bu GPU modu henüz desteklenmiyor."))
             return
-        self._request_boot(_VIEW_TO_GFX[mode], mode, cancel=False)
+        if self._switching:
+            self.state.emit_message("warn", tr("Bir GPU geçişi sürüyor; bitmesini bekle."))
+            return
+        self._busy_target = None
+        if mode == "ultimate":
+            if self._chosen_direct():
+                self.state.emit_message("info", tr("Ultimate zaten etkin."))
+                return
+            self.gpuUltimateConfirm.emit()
+            return
+        if mode == "optimize":
+            self._enable_optimize()
+            return
+        if mode == "standard" and self._chosen_direct():
+            self._set_optimize(False)
+            self._clear_waiting()
+            self._selected_hint = "standard"
+            self._write_mux(1)
+            return
+        if self._chosen_direct() or self._hw_direct():
+            if mode == "standard":      # MUX already restored this session; reboot completes it
+                self.state.emit_message("info", tr("Standart yeniden başlatınca etkin olacak."))
+            else:
+                self._warn_ultimate_blocks()
+            return
+        self._set_optimize(False)
+        self._clear_waiting()
+        self._selected_hint = mode
+        self._switch_to(mode, "user")
+
+    def confirm_ultimate(self, ok: bool) -> None:
+        """Answer to ``gpuUltimateConfirm``: write MUX=0 (effective after reboot) when confirmed."""
+        if not ok or self._switching or self._chosen_direct():
+            return
+        self._set_optimize(False)
+        self._clear_waiting()
+        self._selected_hint = "ultimate"
+        self._write_mux(0)
+
+    def resolve_busy(self, choice: str) -> None:
+        """Answer to ``gpuBusy``: "wait" (switch when the dGPU is free) | "reboot" (boot config) | "cancel"."""
+        target = self._busy_target
+        if target is None or choice not in ("wait", "reboot", "cancel"):
+            return
+        self._busy_target = None
+        if choice == "wait":
+            self._enter_waiting(target, list(self._holders))
+        elif choice == "reboot":
+            self._request_boot(_LIVE_TARGET[target], target, cancel=False)
+        else:
+            self._selected_hint = None
+            self._holders = []
+            self._rebuild_gfx()
 
     def cancel_gpu_pending(self) -> None:
+        if self._switching:
+            self.state.emit_message("warn", tr("Bir GPU geçişi sürüyor; bitmesini bekle."))
+            return
+        if self._waiting is not None or self._busy_target is not None:
+            self._busy_target = None
+            self._selected_hint = None
+            self._clear_waiting()
+            self.state.emit_message("info", tr("Bekleyen GPU değişikliği iptal edildi."))
+            return
+        if self._mux_pending is not None and self._mux_orig is not None:
+            self._selected_hint = None
+            self._write_mux(self._mux_orig)
+            return
         active = self.state.gfx.active
         if active not in _VIEW_TO_GFX:
             self.state.emit_message("warn", tr("Bekleyen değişiklik iptal edilemedi: "
                                        "etkin GPU modu bilinmiyor veya desteklenmiyor."))
             return
+        self._selected_hint = None
         self._request_boot(_VIEW_TO_GFX[active], active, cancel=True)
+
+    # --- Ultimate (MUX) -----------------------------------------------------------------
+    def _write_mux(self, value: int) -> None:
+        """asusd GpuMuxMode (0 = dGPU direct, 1 = hybrid); takes effect after a reboot."""
+        orig = self._mux_orig if self._mux_pending is not None else (0 if self._hw_direct() else 1)
+        self._mux_prev = (self._mux_pending, self._mux_orig)
+        self._mux_orig = orig
+        self._mux_pending = None if value == orig else value
+        self.asusd.set_platform("GpuMuxMode", value)
+        self._rebuild_gfx()
+        if self._mux_pending is None:
+            self.state.emit_message("info", tr("MUX değişikliği geri alındı."))
+        elif value == 0:
+            self.state.emit_message(
+                "info", tr("Ultimate yeniden başlatınca etkin olacak. Bilgisayarı yeniden başlatman gerekiyor."))
+            self.gpuRebootRequired.emit()
+        else:
+            self.state.emit_message(
+                "info", tr("Ultimate'tan çıkış yeniden başlatınca etkin olacak. "
+                           "Bilgisayarı yeniden başlatman gerekiyor."))
+            self.gpuRebootRequired.emit()
+
+    # --- switching ----------------------------------------------------------------------
+    def _switch_to(self, target: str, source: str) -> None:
+        """eco/standard: live when possible, else the boot-config path (reboot)."""
+        active = self.state.gfx.active
+        if active == target and self.state.gfx.pending is None and source == "user":
+            self._selected_hint = None
+            self._rebuild_gfx()
+            self.state.emit_message("info", tr("{name} zaten etkin.", name=tr(self._label(target))))
+            return
+        if self._live_possible() and active != target:
+            self._live(target, source)
+        else:
+            self._request_boot(_VIEW_TO_GFX[target], target, cancel=False)
+
+    @staticmethod
+    def _label(target: str) -> str:
+        return {"eco": "Eco", "standard": "Standart"}[target]
+
+    def _live(self, target: str, source: str) -> None:
+        """Run the helper's live switch. source: "user" (may ask via gpuBusy) | "optimize" | "wait" (silent)."""
+        self._switching = True
+        self.state.emit_busy("gpu", True)
+        self._rebuild_gfx()
+
+        def done(result) -> None:
+            self._switching = False
+            self.state.emit_busy("gpu", False)
+            if result.ok:
+                self._live_succeeded(target)
+                return
+            if getattr(result, "error", None) == "busy":
+                holders = list(getattr(result, "holders", []) or [])
+                self._holders = holders
+                if source == "user":
+                    self._busy_target = target
+                    self._rebuild_gfx()
+                    self.gpuBusy.emit(holders)
+                else:
+                    self._enter_waiting(target, holders, announce=(self._waiting != target))
+                return
+            self._opt_apply_pending = False
+            self._selected_hint = None
+            if source == "wait":
+                self._clear_waiting()
+            self._holders = []
+            self._rebuild_gfx()
+            self._live_failed(result)
+
+        try:
+            self.gfx.request_live(_LIVE_TARGET[target], done)
+        except Exception:
+            log.exception("request_live raised")
+            from ..backend.gfx import LiveResult
+            done(LiveResult(False, error="exception", message="beklenmeyen hata"))
+
+    def _live_succeeded(self, target: str) -> None:
+        self._expect_active = target
+        self._selected_hint = None
+        self._holders = []
+        if self._waiting == target:
+            self._waiting = None
+            self._poll_timer.stop()
+        self._hint_timer.start()
+        self._refresh_timer.start()
+        self.gfx.refresh()
+        self._rebuild_gfx()
+        self.state.emit_message(
+            "info", tr("{name} moduna geçildi.", name=tr(self._label(target))))
+
+    def _live_failed(self, r) -> None:
+        err, code, msg = getattr(r, "error", None), getattr(r, "code", None), getattr(r, "message", "")
+        reboot = bool(getattr(r, "reboot_required", False))
+        if code == 126 or err == "cancelled":
+            self.state.emit_message("info", tr("Yetkilendirme iptal edildi; hiçbir şey değiştirilmedi."))
+            return
+        if code == 127 or err == "unavailable":
+            text = tr("GPU yardımcısı çalıştırılamadı: yetki verilmedi ya da kurulu değil "
+                      "(kurulum: sudo helper/install.sh).")
+        elif err == "mux":
+            text = tr("Ultimate (dGPU doğrudan) MUX modunda Eco kullanılamaz. "
+                      "Önce Ultimate modundan çıkılmalı.")
+        elif err == "supergfxd":
+            text = tr("supergfxd durdurulamadı; GPU geçişi başlatılmadı. Hiçbir şey değişmedi.")
+        elif err == "precondition":
+            text = tr("Canlı GPU geçişi için kurulum eksik (kurulum: sudo helper/install.sh): {msg}", msg=msg)
+        elif err == "aborted":
+            text = tr("GPU geçişi başlamadan durduruldu; hiçbir şey değişmedi. ({msg})", msg=msg)
+        elif err == "failed" or reboot:
+            text = tr("GPU geçişi yarıda kaldı ({msg}). Yapılandırma hedef moda ayarlı; "
+                      "yeniden başlatmak geçişi güvenle tamamlar.", msg=msg)
+        else:
+            text = tr("GPU modu değiştirilemedi: {msg}", msg=msg)
+        self.gpuSwitchFailed.emit(text, reboot)
+
+    # --- waiting for the dGPU to be released -----------------------------------------
+    def _enter_waiting(self, target: str, holders: list, announce: bool = True) -> None:
+        self._waiting = target
+        self._holders = holders
+        if not self._poll_timer.isActive():
+            self._poll_timer.start()
+        self._rebuild_gfx()
+        if announce:
+            names = ", ".join(dict.fromkeys(getattr(h, "comm", "") or "?" for h in holders)) or tr("Bir uygulama")
+            if target == "eco":
+                text = tr("{app} dGPU kullanıyor; kapanınca Eco'ya geçilecek", app=names)
+            else:
+                text = tr("{app} dGPU kullanıyor; kapanınca Standart'a geçilecek", app=names)
+            self.state.emit_message("info", text)
+
+    def _clear_waiting(self) -> None:
+        if self._waiting is None and not self._holders:
+            return
+        self._waiting = None
+        self._holders = []
+        self._poll_timer.stop()
+        self._rebuild_gfx()
+
+    def _poll_holders(self) -> None:
+        target = self._waiting
+        if target is None or self._switching or self._poll_inflight:
+            return
+        self._poll_inflight = True
+
+        def cb(holders: list) -> None:
+            self._poll_inflight = False
+            if self._waiting != target or self._switching:
+                return
+            self._holders = list(holders)
+            if holders:
+                self._rebuild_gfx()
+            else:
+                self._live(target, "wait")
+
+        try:
+            self.gfx.query_holders(cb)
+        except Exception:
+            log.exception("query_holders raised")
+            self._poll_inflight = False
+
+    # --- Optimize -----------------------------------------------------------------------
+    def _set_optimize(self, on: bool) -> None:
+        self._opt_timer.stop()
+        if on == self._optimize:
+            return
+        self._optimize = on
+        self._opt_apply_pending = False
+        self.settings.setValue(K_GPU_OPTIMIZE, on)
+
+    def _enable_optimize(self) -> None:
+        if self._chosen_direct() or self._hw_direct():
+            self._warn_ultimate_blocks()
+            return
+        live_fn = getattr(self.gfx, "live_ready", None)
+        if not (callable(live_fn) and live_fn()):
+            self.state.emit_message(
+                "warn", tr("Optimize için canlı GPU geçişi gerekiyor; kurulu değil "
+                           "(kurulum: sudo helper/install.sh, MUX Hybrid olmalı)."))
+            return
+        self._selected_hint = None
+        self._clear_waiting()
+        self._set_optimize(True)
+        self._rebuild_gfx()
+        self._optimize_apply()
+
+    def _optimize_apply(self) -> None:
+        """Bring the GPU to the mode that fits the current power source (AC -> standard, battery -> eco)."""
+        if not self._optimize:
+            return
+        if self._on_ac is None:
+            self._opt_apply_pending = True       # first sensor snapshot will trigger it
+            return
+        target = "standard" if self._on_ac else "eco"
+        if self._waiting is not None and self._waiting != target:
+            self._clear_waiting()
+        active = self.state.gfx.active
+        if self._switching or active is None:
+            self._opt_apply_pending = True
+            return
+        if active == "ultimate" or self._hw_direct() or self._mux_pending is not None:
+            return
+        if active == target:
+            self._clear_waiting()
+            return
+        if self._waiting == target:
+            return
+        if not self._live_possible():
+            log.info("optimize: live switching unavailable, leaving the GPU as it is")
+            return
+        self._live(target, "optimize")
 
     def _request_boot(self, gfx_mode: GfxMode, name: str, cancel: bool) -> None:
         leaving_eco = (not cancel and name == "standard" and self.state.gfx.active == "eco")
@@ -504,6 +890,14 @@ class Controller(QObject):
             # every AC<->battery TRANSITION; repeated snapshots with the same value don't write.
             if self._auto_refresh and (self._auto_pending or prev != self._on_ac):
                 self._request_auto_refresh()
+            if self._optimize:
+                if prev is None:
+                    self._optimize_apply()       # once at start
+                elif prev != self._on_ac:
+                    wanted = "standard" if self._on_ac else "eco"
+                    if self._waiting is not None and self._waiting != wanted:
+                        self._clear_waiting()
+                    self._opt_timer.start()      # restart = debounce flapping power sources
             if prev is None and not self._on_ac:
                 self._maybe_apply_battery_profile()
         # sensors may refine the GPU power string

@@ -66,6 +66,7 @@ class FakeGfx(QObject):
     modeChanged = pyqtSignal(int)
     powerChanged = pyqtSignal(int)
     pendingChanged = pyqtSignal(object, object)
+    availableChanged = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -76,9 +77,40 @@ class FakeGfx(QObject):
         self.requests = []
         self.reply = (True, "ok")
         self.write_boot = True
+        # live switching fakes (P3)
+        self.live = False                    # live_ready()
+        self.live_requests = []
+        self.live_reply = None               # LiveResult; None -> ok
+        self.live_hold = False               # keep the callback instead of answering at once
+        self.live_cb = None
+        self.live_updates_mode = True
+        self.holder_cbs = []
+        self.refreshes = 0
 
     def refresh(self):
-        pass
+        self.refreshes += 1
+
+    def live_ready(self):
+        return self.live
+
+    def request_live(self, target, cb):
+        from alaz.backend.gfx import LiveResult
+        self.live_requests.append(target)
+
+        def answer():
+            r = self.live_reply or LiveResult(True, 0)
+            if r.ok and self.live_updates_mode:
+                self.mode = target
+                self.boot = target
+                self.dgpu = target == GfxMode.INTEGRATED
+            cb(r)
+        if self.live_hold:
+            self.live_cb = answer
+        else:
+            answer()
+
+    def query_holders(self, cb):
+        self.holder_cbs.append(cb)
 
     def configured_boot_mode(self):
         return self.boot
@@ -338,7 +370,7 @@ def test_request_other_error_has_stderr(env):
     assert env.msgs[-1][0] == "error" and "yazma hatası xyz" in env.msgs[-1][1]
 
 
-@pytest.mark.parametrize("mode", ["ultimate", "optimize"])
+@pytest.mark.parametrize("mode", ["turbo", "hybrid", ""])
 def test_unsupported_modes_make_no_call(env, mode):
     env.ctl.start()
     env.ctl.request_gpu_mode(mode)

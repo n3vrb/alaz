@@ -47,11 +47,15 @@ PLATFORM_TYPES: dict[str, str] = {
     "ChangeThrottlePolicyOnAc": "b",
     "ChangeThrottlePolicyOnBattery": "b",
     "BootSound": "b",
+    # dGPU MUX (0 = dGPU direct / Ultimate, 1 = hybrid). Takes effect after a reboot; written ONLY by the
+    # controller's Ultimate flow, behind a confirmation dialog.
+    "GpuMuxMode": "y",
 }
 # Read-only (or must-not-be-written-by-the-app) properties.
-PLATFORM_READONLY = {"GpuMuxMode", "DgpuDisable", "EgpuEnable", "Version"}
+PLATFORM_READONLY = {"DgpuDisable", "EgpuEnable", "Version"}
 
 _INT_RANGES = {"y": (0, 255), "u": (0, 2**32 - 1)}
+_RANGE_OVERRIDES = {"GpuMuxMode": (0, 1)}
 
 
 class AsusdClient(QObject):
@@ -263,7 +267,7 @@ class AsusdClient(QObject):
             except (TypeError, ValueError):
                 self._fail(f"set_platform:{name}", f"not an integer: {value!r}")
                 return
-            lo, hi = _INT_RANGES[sig]
+            lo, hi = _RANGE_OVERRIDES.get(name, _INT_RANGES[sig])
             if not lo <= value <= hi:
                 self._fail(f"set_platform:{name}", f"value out of range for {sig}: {value}")
                 return

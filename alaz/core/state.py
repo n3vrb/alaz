@@ -27,6 +27,12 @@ class GfxView:
     dgpu_disabled: bool | None = None
     mux_direct: bool | None = None
     can_eco_exit: bool = True
+    selected: str | None = None      # user's choice: "eco" | "standard" | "optimize" | "ultimate"
+    switching: bool = False          # a live switch is running
+    waiting: str | None = None       # target mode queued until holders exit ("eco"/"standard")
+    holders: list = field(default_factory=list)   # [Holder] last seen blocking the switch
+    live_ready: bool = False         # live Eco<->Hybrid switching available (MUX=1 and rule 61 installed)
+    optimize: bool = False           # Optimize is active
 
 
 @dataclass

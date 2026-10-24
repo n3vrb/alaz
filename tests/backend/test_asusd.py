@@ -83,12 +83,19 @@ def test_set_platform_types(client, rec, name, value, sig, expected):
 
 
 @pytest.mark.parametrize("name,value", [("ChargeControlEndThreshold", 300), ("ChargeControlEndThreshold", -1),
-                                        ("DgpuDisable", True), ("GpuMuxMode", 0), ("Nope", 1),
+                                        ("DgpuDisable", True), ("GpuMuxMode", 2), ("GpuMuxMode", -1), ("Nope", 1),
                                         ("PptFppt", "abc")])
 def test_set_platform_rejects_bad_input_without_calling(client, rec, name, value):
     client.set_platform(name, value)
     assert rec.calls == []
     assert len(client.errors) == 1 and client.errors[0][0] == f"set_platform:{name}"
+
+
+@pytest.mark.parametrize("value", [0, 1])
+def test_set_platform_gpu_mux_mode_is_a_byte(client, rec, value):
+    client.set_platform("GpuMuxMode", value)
+    assert rec.calls == [set_call("org.asuslinux.Platform", "GpuMuxMode", "y", value)]
+    assert client.errors == []
 
 
 def test_set_platform_dbus_error_is_emitted(client, rec):
@@ -100,8 +107,9 @@ def test_set_platform_dbus_error_is_emitted(client, rec):
 def test_platform_types_table():
     for name, sig in asusd.PLATFORM_TYPES.items():
         assert sig in ("y", "u", "b"), name
-    for ro in ("GpuMuxMode", "DgpuDisable", "Version"):
+    for ro in ("DgpuDisable", "Version"):
         assert ro not in asusd.PLATFORM_TYPES
+    assert asusd.PLATFORM_TYPES["GpuMuxMode"] == "y"
 
 
 def test_fan_curve_calls(client, rec):
