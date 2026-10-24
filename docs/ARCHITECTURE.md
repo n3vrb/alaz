@@ -8,7 +8,7 @@ Tasarım kaynağı: `docs/design/V2Main.dc.html`, `V2Fans.dc.html`, `V2MiniTray.
 ## Değişmez kurallar (hepsi zorunlu)
 
 1. **GUI thread asla bloklanmaz.** Tüm D-Bus çağrıları **asenkron** (`QDBusConnection.asyncCall` + `QDBusPendingCallWatcher`) veya worker thread'de. `subprocess` sadece worker thread'de.
-2. **`supergfxctl -m` / supergfxd `SetMode` / `SetConfig` ASLA çağrılmaz.** GPU modu değişikliği yalnızca `helper/alaz-gfx-helper` (pkexec) ile ve **yeniden başlatma gerektiren** bir istek olarak yapılır. (Sebep: bu sistemde canlı GPU geçişi gnome-shell'i öldürüyor/donduruyor.)
+2. **`supergfxctl -m` / supergfxd `SetMode` / `SetConfig` ASLA çağrılmaz.** GPU modu değişikliği yalnızca `helper/alaz-gfx-helper` (pkexec) ile yapılır: ya yeniden başlatma gerektiren boot modu (`set-boot-mode`) ya da ön koşulları sağlanmışsa canlı geçiş (`live-eco` / `live-hybrid`; bkz. aşağıdaki "Canlı GPU geçişi" bölümü ve `docs/LIVE_GPU_CONTRACT.md`). (Sebep: `supergfxctl -m` ile canlı geçiş gnome-shell'i öldürüyor/donduruyor.)
 3. **dGPU'yu gereksiz uyandırma.** `nvidia-smi` yalnızca `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status == "active"` iken çağrılır (yol, supergfxd'nin bildirdiği/PCI'da bulunan NVIDIA aygıtından türetilir). Aksi halde GPU "Uyku".
 4. **Testlerde gerçek sisteme yazma YOK.** Okuma serbest. Yazma yolları mock/fake ile test edilir.
 5. Her modül `logging.getLogger(__name__)` kullanır; `print` yok.
@@ -230,3 +230,40 @@ GPU için sadece `gfx.request_boot_mode` (helper) — Eco çıkışı başarıl�
 `MiniWindow` + `Tray` (V2MiniTray). Pencereler YALNIZCA `AppState` okur/dinler ve `Controller` çağırır.
 `app.py`: QApplication, `theme.apply`, backend nesneleri, state, controller, pencereler, tray; tek örnek (QLocalServer ile ikinci
 başlatma mevcut pencereyi öne getirir); `--minimized`. `__main__.py`: `main()`.
+
+---
+
+## Canlı GPU geçişi (2026-10-24) — özet
+
+Ayrıntılı sözleşme, çıkış kodları ve ön koşullar: **`docs/LIVE_GPU_CONTRACT.md`**; kurulum/geri alma: `docs/SYSTEM_SETUP.md` bölüm 7d.
+Yukarıdaki "Dalga 1/2" bölümleri tarihsel taslaktır; GPU ile ilgili kısımlar burada güncellenmiştir.
+
+### Helper komutları (`helper/alaz-gfx-helper`)
+- `set-boot-mode {integrated|hybrid}` — değişmedi (boot config + gerekirse Eco çıkış prosedürü, reboot gerekir).
+- `live-eco` — Hybrid → Eco şimdi (~10 sn), boot config → Integrated. `live-hybrid` — Eco → Hybrid şimdi (~13 sn), boot config → Hybrid.
+- `holders` — dGPU'yu tutan süreçleri JSON listeler, hiçbir şey değiştirmez, root gerekmez. `status` artık `holders` ve `live_ready` (MUX=1 ve kural 61 var) da verir.
+- Çıktının SON satırı daima tek JSON nesnesidir. Çıkış kodları: 0 tamam/zaten hedefte, 4 MUX dGPU-direct, 5 root değil, 6 config hatası, 7 supergfxd durdurulamadı, 9 meşgul (`holders` ile; hiçbir şey değişmedi), 10 yarıda başarısız (`reboot_required`; boot config zaten hedefte), 11 ön koşul eksik (kural 61), 12 kalıcı değişiklikten önce iptal (servisler geri alındı).
+- Hiçbir süreç öldürülmez; dGPU'yu kullanan uygulama varsa geçiş reddedilir. Geçiş sırasında Ubuntu'nun `71-nvidia.rules` dosyası `/run/udev/rules.d` ile maskelenir ve `/run/modprobe.d` altına geçici kara liste yazılır; her durumda geri alınır.
+- Ön koşullar: udev kuralları `61-alaz-mutter-ignore-nvidia.rules` ve `72-alaz-nvidia-render-noaccess.rules` (`helper/install.sh`), oturum ortamı `~/.config/environment.d/90-alaz-egl-mesa.conf` (`install.sh`, yeniden giriş gerekir). Polkit: `org.alaz.gfx.set-boot-mode`, `org.alaz.gfx.live-eco`, `org.alaz.gfx.live-hybrid` (hepsi `exec.argv1` taşır; pkexec ilk eşleşen eylemi seçer).
+
+### Backend (`backend/gfx.py`)
+```python
+def live_ready(self) -> bool                                    # MUX=1 ve kural 61 kurulu
+def request_live(self, target: GfxMode, callback: Callable[[LiveResult], None]) -> None   # pkexec live-eco|live-hybrid (QProcess, async)
+def query_holders(self, callback: Callable[[list[Holder]], None]) -> None                 # `holders` komutu, pkexec yok
+@dataclass Holder:     pid, comm, user, exe, nodes
+@dataclass LiveResult: ok, code, error, holders, reboot_required, message
+```
+
+### State (`core/state.py`) — `GfxView` yeni alanlar
+`selected` ("eco"|"standard"|"optimize"|"ultimate", kullanıcının seçimi), `switching` (canlı geçiş sürüyor; GPU kutucukları kilitli),
+`waiting` (dGPU boşalınca geçilecek hedef), `holders` (geçişi engelleyen son liste), `live_ready`, `optimize`.
+`active` hâlâ DONANIMIN şu anki modudur ("eco"|"standard"|"ultimate").
+
+### Controller (`core/controller.py`)
+- `request_gpu_mode(mode)` — `eco|standard|optimize|ultimate`. eco/standard: `live_ready` ise canlı, değilse eski boot yolu; Optimize'ı kapatır. `optimize`: ayarı (`gpu/optimize`) açar ve hemen uygular. `ultimate`: `gpuUltimateConfirm` yayar.
+- `confirm_ultimate(ok)` — risk diyaloğunun cevabı: asusd `GpuMuxMode` 0 yazılır (Ultimate'tan çıkış: 1), sonra yeniden başlatma istemi. MUX=0 iken eco/optimize devre dışı.
+- `resolve_busy(choice)` — `"wait"` (kapanınca geç) | `"reboot"` (boot modu yaz, yeniden başlatınca uygula) | `"cancel"`. `cancel_gpu_pending()` bekleyen hedefi de iptal eder.
+- Sinyaller: `gpuBusy(list)` (holders → UI meşgul diyaloğu), `gpuSwitchFailed(str, bool)` (mesaj, reboot_required), `gpuUltimateConfirm()`, `gpuRebootRequired()`.
+- **Optimize durum makinesi:** prizdeyken hedef Standart, pildeyken Eco; güç kaynağı değişince 5 sn debounce; uygulama açılışında bir kez uygulanır (ilk sensör örneği gelene kadar bekler). Meşgulse kullanıcıya SORMAZ: `waiting` hedefi ayarlanır, her 5 sn `query_holders` yoklanır, liste boşalınca geçilir (toast ile bildirilir). Hedef değişirse bekleme iptal olur. Asla otomatik yeniden başlatmaz. Ultimate/MUX bekleyen durumda hiçbir şey yapılmaz.
+- UI: ana pencerede dört GPU kutucuğu, "Geçiliyor…" durumu, meşgul diyaloğu (`dialogs.py`; uygulama adları + Kapatınca geç / Yeniden başlatınca uygula / Vazgeç), Ultimate risk diyaloğu, tepsi menüsü girdileri. Sahte controller/state: `ui/windows/_fake.py`.

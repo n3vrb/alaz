@@ -24,7 +24,7 @@ ASUS ROG dizüstü bilgisayarlar için Linux'ta çalışan, [G-Helper](https://g
 
 | | |
 |---|---|
-| ![Eco bekliyor](docs/screenshots/tr/main-eco-pending.png) Eco seçili, bir sonraki açılışta uygulanır | ![Fanlar ve güç](docs/screenshots/tr/fans-power.png) Fan eğrisi editörü, güç limitleri, NVIDIA, EPP |
+| ![Eco bekliyor](docs/screenshots/tr/main-eco-pending.png) Eco seçili, bir sonraki açılışta uygulanıyor (canlı geçiş kurulu değilken geçerli yedek yol) | ![Fanlar ve güç](docs/screenshots/tr/fans-power.png) Fan eğrisi editörü, güç limitleri, NVIDIA, EPP |
 | ![Mini pencere](docs/screenshots/tr/mini.png) Mini pencere | ![Tepsi menüsü](docs/screenshots/tr/tray-menu.png) Tepsi menüsü |
 | ![Klavye](docs/screenshots/tr/keyboard.png) Klavye parlaklığı ve rengi | ![Ayarlar](docs/screenshots/tr/settings.png) Ayarlar |
 
@@ -38,7 +38,11 @@ Ekran görüntüleri sahte verilerle üretilmiştir (`tools/screenshot_windows.p
 - **NVIDIA Dynamic Boost ve sıcaklık hedefi** kaydırıcıları (asusd özellikleri).
 - Profil başına **EPP** (enerji/performans tercihi).
 - **Prize takılı / pil için otomatik profil:** Prizdeyken bir profil, pildeyken başka bir profil uygulanır.
-- **GPU modları:** Eco ve Standart. İkisi de **yalnızca açılışta uygulanır ve güvenlidir** ([nedeni](#4-bu-proje-neden-var-neler-öğrendik)). Ultimate (MUX) ve Optimize gösterilir ama henüz desteklenmez.
+- **GPU modları:**
+  - **Eco ve Standart, yeniden başlatmadan canlı geçer** (yaklaşık 10–13 sn); `supergfxctl -m` ile değil, Alaz'ın kendi root yardımcısıyla ([nedeni](#4-bu-proje-neden-var-neler-öğrendik)). Bunun için isteğe bağlı yardımcının kurulması ve yeniden oturum açılması gerekir ([Kurulum](#6-kurulum)); aksi halde Alaz değişikliği bir sonraki açılışta uygulamaya geri döner.
+  - **Optimize:** Prizdeyken Standart, pildeyken Eco; otomatik geçer (5 sn bekleme payıyla). dGPU'yu kullanan bir uygulama varsa o kapanana kadar bekler; hiçbir şeyi sonlandırmaz ve asla yeniden başlatmaz.
+  - **Ultimate (MUX, dGPU doğrudan)** asusd üzerinden yazılır ve yeniden başlatma gerektirir. Kod hazır ama gerçek donanımda henüz denenmedi; risk uyarısı diyaloğuyla gelir.
+  - dGPU'yu kullanan bir uygulama varken canlı geçiş reddedilir; Alaz kapanmasını beklemeyi, yeniden başlatınca uygulamayı ya da vazgeçmeyi sunar.
 - Yalnızca **dahili panelin** yenileme hızı (harici monitöre dokunmaz) ve Otomatik seçeneği: prizde en yüksek hız, pilde 60 Hz.
 - **Panel Overdrive** anahtarı.
 - **Şarj limiti** (%20–%100).
@@ -58,9 +62,10 @@ Ekran görüntüleri sahte verilerle üretilmiştir (`tools/screenshot_windows.p
 
 ## 4. Bu proje neden var: neler öğrendik
 
-Mevcut araçların çoğu GPU'yu canlı değiştirebileceğini varsayar. Bu donanımda değiştiremezsin; güvenilir bir Eco modu için birbiriyle ilgisiz bir dizi sorunu bulmak gerekti. Aşağıdaki özetin her maddesi komutlar ve geri alma adımlarıyla **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)** dosyasında anlatılıyor (İngilizce). Hepsi yalnızca yukarıdaki referans makinede doğrulandı.
+Mevcut araçların çoğu GPU'yu `supergfxctl` ile canlı değiştirir. Bu donanımda bu, oturumu bozuyor; güvenilir bir Eco modu için (önce açılışta, sonra canlı) birbiriyle ilgisiz bir dizi sorunu bulmak gerekti. Aşağıdaki özetin her maddesi komutlar ve geri alma adımlarıyla **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)** dosyasında anlatılıyor (İngilizce). Hepsi yalnızca yukarıdaki referans makinede doğrulandı.
 
-- **Canlı GPU geçişi GNOME'u bozar.** Oturum açıkken `supergfxctl -m`, Eco'ya girerken gnome-shell ve Xwayland'i öldürdü, Eco'dan çıkarken Wayland gnome-shell'i dondurdu. Bu yüzden Alaz GPU modunu **yalnızca açılışta** değiştirir, canlı geçişi hiç çağırmaz.
+- **`supergfxctl -m` GNOME'u bozar.** Oturum açıkken Eco'ya girerken gnome-shell ve Xwayland'i öldürdü, Eco'dan çıkarken Wayland gnome-shell'i dondurdu. Alaz onu hiç çağırmaz.
+- **Canlı geçiş, kompozitör NVIDIA kartından uzak tutulunca çalışır.** Asıl nedenler: mutter'ın NVIDIA DRM kartını açması ve gnome-shell/Xwayland'in NVIDIA EGL'sini yüklemesi. İki udev kuralı (mutter NVIDIA kartını yok sayar; NVIDIA render düğümünde `uaccess` ACL yok) ve EGL'yi Mesa'ya yönlendiren bir oturum değişkeni bunu çözer; `/dev/nvidia*` erişilebilir kaldığı için GLX/EGL/Vulkan/CUDA offload çalışmaya devam eder. Geçiş sırasında yardımcı ayrıca Ubuntu'nun `71-nvidia.rules` dosyasını maskeler (yoksa udev sürücüyü bitmeyen bir döngüyle yükleyip boşaltıyor) ve işi bitince her durumda geri alır. Tasarım: [docs/LIVE_GPU_CONTRACT.md](docs/LIVE_GPU_CONTRACT.md) (İngilizce).
 - **Eco'ya giriş:** `/etc/supergfxd.conf` içinde `"mode": "Integrated"` yap ve yeniden başlat.
 - **Eco'dan çıkış (hile):** supergfxd Eco'dan kendiliğinden çıkmaz (`dgpu_disable=1` görünce modu yine Integrated'a zorlar). Çalışan sıra: supergfxd'yi durdur, `/sys/bus/pci/drivers_autoprobe` değerini `0` yap, yapılandırmada modu Hybrid yap, `dgpu_disable=0` yaz, **yeniden başlat**. Kart sürücüsüz geri gelir; masaüstü çalışırken yeni bir GPU belirmez.
 - **Plymouth, Eco girişini şansa bağladı.** Açılış logosu, o an mevcut tek DRM aygıtı olan NVIDIA'yı (~4,5. saniye) açıyordu; supergfxd'nin `rmmod nvidia` komutu "module in use" ile başarısız oldu ve Eco yarım kaldı. Çekirdek satırından `splash` kaldırmak sorunu çözdü; bedeli yaklaşık 6,5 sn daha uzun açılış.
@@ -77,7 +82,7 @@ Mevcut araçların çoğu GPU'yu canlı değiştirebileceğini varsayar. Bu dona
 - **D-Bus API'leri:** asusd (`org.asuslinux.Daemon`: Platform, FanCurves, Aura) ve supergfxd (`org.supergfxctl.Daemon`, yalnızca okuma; `SetMode` ve `SetConfig` bilerek hiç çağrılmaz).
 - **Sensörler:** `psutil` ile sysfs/hwmon, RAPL için `powercap`.
 - **Ekran:** D-Bus üzerinden Mutter `org.gnome.Mutter.DisplayConfig`, X11'de `xrandr`.
-- **Yetki:** polkit + `pkexec` yardımcısı, yalnızca açılış modu yapılandırması ve Eco çıkışı için; bir udev kuralı yalnızca RAPL `psys` sayacını açar.
+- **Yetki:** polkit + `pkexec` yardımcısı, yalnızca GPU modu için (açılış modu yapılandırması, Eco çıkışı ve canlı Eco/Standart geçişi); bir udev kuralı yalnızca RAPL `psys` sayacını açar.
 
 ```
 alaz/
@@ -89,6 +94,7 @@ helper/
 ├── alaz-gfx-helper         root yardımcı (yalnızca standart kütüphane)
 ├── org.alaz.gfx.policy      polkit eylemi
 ├── 90-alaz-rapl.rules      udev kuralı (yalnızca RAPL psys)
+├── 61-…/72-… .rules        canlı GPU geçişi için udev kuralları
 └── install.sh / uninstall.sh      ayrıcalıklı kurulum, sudo ile çalışır
 tests/                             pytest, ekransız (offscreen) Qt
 tools/                             ekran görüntüsü ve widget galeri betikleri
@@ -106,7 +112,7 @@ cd alaz
 ./install.sh
 ```
 
-Uygulamayı `~/.local/share/alaz` altına, başlatıcıyı `~/.local/bin/alaz` olarak, bir masaüstü girdisi ve bir simge ile birlikte kurar. `~/.local/bin` dizininin `PATH` içinde olduğundan emin ol.
+Uygulamayı `~/.local/share/alaz` altına, başlatıcıyı `~/.local/bin/alaz` olarak, bir masaüstü girdisi ve bir simge ile birlikte kurar; Mesa'nın EGL vendor dosyası varsa canlı GPU geçişinin ihtiyaç duyduğu `~/.config/environment.d/90-alaz-egl-mesa.conf` dosyasını da koyar. `~/.local/bin` dizininin `PATH` içinde olduğundan emin ol.
 
 ### Oturum açılışında başlatma
 
@@ -121,7 +127,7 @@ Servis, oturum açılınca uygulamayı tepside küçültülmüş başlatır (tep
 
 ### İlk çalıştırma
 
-Uygulama menüsünden **Alaz**'ü aç ya da `alaz` komutunu çalıştır. Performans modları, fan eğrileri, güç limitleri, ekran ve klavye kontrolleri `asusd` çalışır çalışmaz kullanılabilir. GPU modu geçişi ve toplam güç göstergesi için aşağıdaki isteğe bağlı bölüm gerekir.
+Uygulama menüsünden **Alaz**'ü aç ya da `alaz` komutunu çalıştır. Performans modları, fan eğrileri, güç limitleri, ekran ve klavye kontrolleri `asusd` çalışır çalışmaz kullanılabilir. GPU modu geçişi ve toplam güç göstergesi için aşağıdaki isteğe bağlı bölüm gerekir. **Canlı Eco/Standart geçişi için `sudo ./helper/install.sh` çalıştır, sonra oturumu kapatıp yeniden aç** (ortam değişkeni dosyası yalnızca oturum açılışında okunur).
 
 ### İsteğe bağlı ayrıcalıklı yardımcı (sudo gerekir)
 
@@ -129,21 +135,26 @@ Uygulama menüsünden **Alaz**'ü aç ya da `alaz` komutunu çalıştır. Perfor
 sudo ./helper/install.sh
 ```
 
-Üç dosya kurar:
+Şu dosyaları kurar:
 
 | Dosya | Amaç |
 |---|---|
 | `/usr/local/libexec/alaz-gfx-helper` | `pkexec` ile çalışan root yardımcı |
 | `/usr/share/polkit-1/actions/org.alaz.gfx.policy` | polkit eylemi (`auth_admin_keep`) |
 | `/etc/udev/rules.d/90-alaz-rapl.rules` | RAPL `psys` sayacını okunabilir yapar |
+| `/etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules` | mutter NVIDIA DRM kartını yok sayar (yalnızca MUX Optimus iken) |
+| `/etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules` | NVIDIA render düğümünde `uaccess` ACL yok (yalnızca MUX Optimus iken) |
+| `/etc/udev/rules.d/70-alaz-peripherals.rules` | desteklenen çevre birimlerine erişim (Cihazlar penceresi) |
 
-**Yardımcının yapabildikleri:** yalnızca `/etc/supergfxd.conf` içindeki `"mode"` anahtarını (Integrated veya Hybrid) yedek alarak ve atomik biçimde değiştirir; Eco'dan çıkarken test edilmiş Eco çıkış sırasını (supergfxd'yi durdur, `drivers_autoprobe=0`, `dgpu_disable=0`) çalıştırır. Symlink olan yapılandırmayı reddeder, tüm girdiyi doğrular ve MUX doğrudan dGPU'ya ayarlıyken Eco'yu reddeder.
+Polkit dosyası üç eylem tanımlar (`set-boot-mode`, `live-eco`, `live-hybrid`); canlı olanlar etkin yerel oturumda parola sormaz.
 
-**Yapmadıkları:** `supergfxctl`'yi asla çağırmaz, yeniden başlatmaz (uygulama sana sorar, sonra logind üzerinden yeniden başlatır) ve yalnızca tek bir alt süreç çalıştırır (`/usr/bin/systemctl stop supergfxd.service`; mutlak yol, temiz ortam, kabuk yok).
+**Yardımcının yapabildikleri:** yalnızca `/etc/supergfxd.conf` içindeki `"mode"` anahtarını (Integrated veya Hybrid) yedek alarak ve atomik biçimde değiştirir; açılış yolu için test edilmiş Eco çıkış sırasını çalıştırır; canlı geçişi yapar (`live-eco` / `live-hybrid`: NVIDIA modüllerini boşalt ya da yükle, PCI aygıtını kaldır ya da yeniden tara, `dgpu_disable` yaz) ve dGPU'yu kullanan süreçleri yalnızca okuyarak listeleyen bir `holders` komutu sunar. Symlink olan yapılandırmayı reddeder, tüm girdiyi doğrular; MUX doğrudan dGPU'ya ayarlıyken ya da udev kuralı yokken canlı geçişi, bir süreç dGPU'yu tutuyorken de geçişi reddeder (hiçbir süreci sonlandırmaz).
+
+**Yapmadıkları:** `supergfxctl`'yi asla çağırmaz, hiçbir süreci sonlandırmaz, yeniden başlatmaz (uygulama sana sorar, sonra logind üzerinden yeniden başlatır) ve yalnızca sabit sistem araçlarını mutlak yolla çalıştırır (`systemctl`, `modprobe`, `udevadm`); temiz ortam, kabuk yok.
 
 **Güvenlik notları**
 
-- Her GPU değişikliği yönetici kimlik doğrulaması ister (`auth_admin_keep`: yetki kısa bir süre hatırlanır).
+- Açılışta uygulanan GPU değişiklikleri yönetici kimlik doğrulaması ister (`auth_admin_keep`: yetki kısa bir süre hatırlanır). Canlı geçişler (`live-eco`, `live-hybrid`) etkin yerel oturum için parolasız izinlidir; çünkü yalnızca Eco ile Standart arasında geçiş yapabilirler ve uygulamalar GPU'yu kullanırken reddederler. Parola sorulmasını istersen polkit dosyasını sil ya da düzenle.
 - udev kuralı, `psys` RAPL alanının `energy_uj` dosyasını herkes tarafından okunabilir yapar; paket, çekirdek ve DRAM alanlarına dokunulmaz. Herkesçe okunabilir RAPL enerji sayaçları yan kanal araştırmalarında (PLATYPUS) kullanılmıştır; burada maruziyet yalnızca platform sayacıyla sınırlıdır, ama bu seni rahatsız ediyorsa udev kuralını silebilirsin (sistem gücü göstergesi o zaman kullanılamaz).
 
 ### Kaldırma
@@ -165,16 +176,18 @@ Bunlar GPU geçişini ve profilleri güvenilir kılar. Hepsi isteğe bağlıdır
 6. Çift önyükleme: `GRUB_DEFAULT` değerini girdi adıyla ver.
 7. Modelin gerektiriyorsa `pcie_aspm=off` kalsın (referans makinede gerekiyordu).
 
-Rehberde ayrıca **yapılmaması** gerekenler de var: canlı `supergfxctl -m`, NVIDIA otomatik yüklemesini kara listeye almak (dört siyah ekranlı açılış) ve supergfxd bekleme drop-in'i (her açılışa 20 sn ekler).
+Rehberin 7d bölümü canlı geçiş kurulumunu anlatır (neler kurulur, nasıl doğrulanır, yan etkiler, geri alma). Rehberde ayrıca **yapılmaması** gerekenler de var: canlı `supergfxctl -m`, NVIDIA otomatik yüklemesini kara listeye almak (dört siyah ekranlı açılış) ve supergfxd bekleme drop-in'i (her açılışa 20 sn ekler).
 
 ## 8. Güvenlik ve sınırlamalar
 
 - **Yalnızca tek model test edildi.** Diğer her şey doğrulanmamıştır. Başka modellerden hata raporları çok değerlidir.
-- **Eco'dan çıkış hemen yeniden başlatma gerektirir.** dGPU sürücüsüz olarak hemen yeniden etkinleştirilir ve `drivers_autoprobe` yeniden başlatana kadar `0` kalır. Uygulama yeniden başlatmayı sorar.
-- **Eco'da, dGPU'ya bağlı portlarda harici ekran çalışmaz.**
+- **Canlı geçiş için yardımcının kurulması ve yeniden oturum açılması gerekir** ve yalnızca MUX Optimus (Standart/Eco) modundayken çalışır. Aksi halde Eco'dan çıkış hemen yeniden başlatmaya düşer (dGPU sürücüsüz olarak yeniden etkinleştirilir ve `drivers_autoprobe` o zamana kadar `0` kalır); uygulama bunu sorar.
+- **dGPU'yu kullanan uygulamalar canlı geçişi engeller.** Hiçbir şey sonlandırılmaz: kapanmalarını bekleyebilir, yeniden başlatınca uygulatabilir ya da vazgeçebilirsin.
+- **dGPU'ya bağlı portlar** (referans makinede bir HDMI ve bir DisplayPort) Eco'da harici ekran vermez; canlı geçiş udev kuralıyla Standart'ta da vermez.
+- **Yalnızca EGL kullanan uygulamalar varsayılan olarak iGPU'da çalışır** (örneğin Wayland'de Blender görünüm penceresi). dGPU için `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` ile başlat; GNOME'un "Ayrık GPU ile başlat" seçeneği bunu ayarlamaz. CUDA/OptiX render etkilenmez.
+- **Açık konular:** Ultimate (MUX) donanımda denenmedi; harici monitör bağlıyken canlı Eco geçişi henüz sınanmadı (bir denemede dahili panel kendiliğinden yeniden açıldı). Bkz. [docs/TODO.md](docs/TODO.md).
 - **`splash`'ı kaldırmak** referans makinede açılışı yaklaşık 6,5 sn uzatır.
 - **Özel mod, Turbo'nun fan eğrilerini paylaşır** (Performance politikasını kullanır). Özel'den çıkınca yalnızca politika yazılır; donanım yazılımının kendi limitlerine dönüp dönmediği doğrulanmadı.
-- **Ultimate (MUX) ve Optimize GPU modları henüz desteklenmiyor.**
 - Referans makinede boşta tüketim pilde yaklaşık 15–16 W (ölçüldü; RAPL `psys` değeri 1–2 W daha yüksek gösteriyor). `pcie_aspm=off` muhtemelen bunun bir kısmına mal oluyor ama bu modelde gerekli (yukarıya bakın).
 - Referans makinede `nvidia-powerd` kurulu değildi ve Dynamic Boost ona bağlı; oradaki kaydırıcının etkisi incelenmedi.
 - Arayüz yalnızca İngilizce ve Türkçedir (Ayarlar → Dil; diğer diller katkı olarak memnuniyetle karşılanır).
@@ -187,9 +200,9 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest tests
 QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots/tr --lang tr   # pencereleri sahte durumla çiz
 ```
 
-Test takımında 262 test var (backend'ler, core controller ve state, widget'lar, pencereler, root yardımcı) ve ekransız çalışır. **Testler gerçek sisteme asla yazmaz**; yazma yolları mock, sahte nesneler ve yeniden köklendirilmiş yardımcıyla (`ALAZ_HELPER_TESTROOT`, yalnızca root değilken geçerli) sınanır.
+Test takımında 591 test var (backend'ler, core controller ve state, widget'lar, pencereler, root yardımcı) ve ekransız çalışır. **Testler gerçek sisteme asla yazmaz**; yazma yolları mock, sahte nesneler ve yeniden köklendirilmiş yardımcıyla (`ALAZ_HELPER_TESTROOT`, yalnızca root değilken geçerli) sınanır.
 
-Katkı kuralları ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) kaynaklı): GUI thread'ini asla bloklama; `supergfxctl -m` ya da supergfxd `SetMode`/`SetConfig` çağırma; izleme için dGPU'yu uyandırma; okunamayan değer `None` olur ve uydurma sayı yerine tire olarak görünür; `print` yerine `logging` kullan. Değişikliğinle birlikte test ekle ya da güncelle. Pull request'ler memnuniyetle karşılanır; özellikle: çeviriler, diğer ROG modelleri, Ultimate/MUX desteği, diğer masaüstü ortamları.
+Katkı kuralları ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) kaynaklı): GUI thread'ini asla bloklama; `supergfxctl -m` ya da supergfxd `SetMode`/`SetConfig` çağırma (canlı geçiş yalnızca yardımcıdan geçer, bkz. [docs/LIVE_GPU_CONTRACT.md](docs/LIVE_GPU_CONTRACT.md)); izleme için dGPU'yu uyandırma; okunamayan değer `None` olur ve uydurma sayı yerine tire olarak görünür; `print` yerine `logging` kullan. Değişikliğinle birlikte test ekle ya da güncelle. Pull request'ler memnuniyetle karşılanır; özellikle: çeviriler, diğer ROG modelleri, Ultimate/MUX denemesi, diğer masaüstü ortamları.
 
 ### Nasıl yapıldı
 

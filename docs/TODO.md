@@ -1,7 +1,7 @@
 # TODO — Alaz
 
 Ordered roughly by priority. Each item: why, where, how to verify. Update this file when you finish or
-discover something. Status as of 2026-10-03. Read `CLAUDE.md` first (hard rules!).
+discover something. Status as of 2026-10-24. Read `CLAUDE.md` first (hard rules!).
 
 ## Rename follow-ups
 - [x] New Alaz logo — done: Turkic tamga-style emblem chosen by the owner, traced to an exact vector polygon (`tools/alaz_logo_shape.py`), all sizes rendered by `tools/make_logo.py` (re-run it after editing the shape).
@@ -34,8 +34,15 @@ until fixed.
 - [ ] **AMD**: on ASUS AMD models asusd PPT (incl. `ppt_apu_sppt`, `ppt_platform_sppt`) is expected to work — needs a tester (the owner's friend: AMD ROG, thermal shutdowns under load; quick workaround for him: `echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost`). Optionally ryzenadj later.
 
 ## 2. GPU modes
-- [ ] **Ultimate (MUX)**: asusd `GpuMuxMode` (y, writable; 1 = Optimus, 0 = dGPU direct) applies at reboot (no live effect). Risk: if the NVIDIA driver fails in Ultimate the internal panel is black (no iGPU fallback) → recovery = Windows G-Helper or TTY. Plan a controlled 2-reboot test with the owner, rollback ready. Helper already refuses Eco while MUX=0.
-- [ ] **Optimize**: on unplug, offer "switch to Eco and reboot?" notification (and reverse on AC). No automatic reboots.
+Live Eco <-> Standard switching is done and proven on the reference machine (2026-10-24); design in `docs/LIVE_GPU_CONTRACT.md`, setup/rollback in `docs/SYSTEM_SETUP.md` section 7d.
+- [x] **Live Eco/Standard** — helper `live-eco` / `live-hybrid` (~10 s / ~13 s), busy dialog (nothing is killed), polkit actions with argv1, rules 61/72, EGL environment.d snippet.
+- [x] **Optimize** — done, live: AC -> Standard, battery -> Eco, 5 s debounce, applied once at start; if apps use the dGPU it waits (polls every 5 s) and never reboots.
+- [ ] **Ultimate (MUX)** — code done (asusd `GpuMuxMode` 0 = enter / 1 = leave, risk dialog, then the reboot prompt; Eco/Optimize disabled while MUX=0), **hardware test pending**. Risk: if the NVIDIA driver fails in Ultimate the internal panel is black (no iGPU fallback) → recovery = Windows G-Helper or TTY. Plan a controlled 2-reboot test (enter, then leave) with the owner, rollback ready.
+- [ ] **External monitor + live Eco**: with an external monitor attached, mutter turned the internal eDP-1 ON by itself ~1 s after `dgpu_disable=1` (no card1 udev event; the kernel only logs an i915 vgaarb "decodes changed"). Test pending with the monitor.
+- [ ] `nvidia-persistenced` ends up inactive after a live Hybrid switch (cause unknown, no visible effect). Check whether the helper's `reset-failed` + start races something.
+- [ ] **"Launch on dGPU" feature** for EGL-only apps (e.g. Blender viewport on Wayland): they need `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`; GNOME's "Launch using discrete GPU" sets only GLX/Vulkan variables.
+- [ ] **Display backend polling**: `alaz/backend/display.py` polls mutter `GetCurrentState` every 1 s; use the `MonitorsChanged` signal instead.
+- Known side effect: ports wired to the NVIDIA GPU (card0 HDMI-A-2 / DP-4) do not work in Hybrid with rule 61 (they do not work in Eco either).
 
 ## 3. Boot / power
 - [ ] **Bring back the boot logo safely**: removing `splash` costs ~6.5 s in initramfs (cause unknown). Idea: keep `splash` but make Plymouth not use the NVIDIA DRM device (e.g. early-load i915 in initramfs so it's first, or plymouth device selection). Boot-order change → one-boot tests via GRUB `e`, rollback ready, owner's consent.

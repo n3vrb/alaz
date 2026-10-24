@@ -24,7 +24,7 @@ English | [Türkçe](README.tr.md)
 
 | | |
 |---|---|
-| ![Eco pending](docs/screenshots/main-eco-pending.png) Eco selected, applies at next boot | ![Fans and power](docs/screenshots/fans-power.png) Fan curve editor, power limits, NVIDIA, EPP |
+| ![Eco pending](docs/screenshots/main-eco-pending.png) Eco selected, applying at next boot (the fallback when live switching is not installed) | ![Fans and power](docs/screenshots/fans-power.png) Fan curve editor, power limits, NVIDIA, EPP |
 | ![Mini window](docs/screenshots/mini.png) Mini window | ![Tray menu](docs/screenshots/tray-menu.png) Tray menu |
 | ![Keyboard](docs/screenshots/keyboard.png) Keyboard brightness and colour | ![Settings](docs/screenshots/settings.png) Settings |
 
@@ -38,7 +38,11 @@ The screenshots are rendered with fake data (`tools/screenshot_windows.py`), so 
 - **NVIDIA Dynamic Boost and temperature target** sliders (asusd properties).
 - **EPP** (energy performance preference) per profile.
 - **AC/battery auto profile:** pick a profile to apply when plugged in and another on battery.
-- **GPU modes:** Eco and Standard. Both are **boot-time and safe** (see [why](#4-why-this-exists-what-we-learned)). Ultimate (MUX) and Optimize are shown but not supported yet.
+- **GPU modes:**
+  - **Eco and Standard switch live, without a reboot** (about 10 to 13 s) through Alaz's own root helper, never through `supergfxctl -m` (see [why](#4-why-this-exists-what-we-learned)). This needs the optional helper install plus a re-login (see [Install](#6-install)); otherwise Alaz falls back to applying the change at the next boot.
+  - **Optimize:** Standard on AC, Eco on battery, switched automatically (5 s debounce). If an app is using the dGPU it waits until the app closes; it never kills anything and never reboots.
+  - **Ultimate (MUX, dGPU direct)** is written through asusd and needs a reboot. The code is done but not yet tested on real hardware, and it comes with a risk warning dialog.
+  - If an app is using the dGPU, a live switch is refused and Alaz lets you wait for it to close, apply at next reboot, or cancel.
 - **Refresh rate** of the internal panel only (never an external monitor), plus an Auto setting: highest rate on AC, 60 Hz on battery.
 - **Panel Overdrive** toggle.
 - **Battery charge limit** (20 to 100 %).
@@ -58,9 +62,10 @@ The screenshots are rendered with fake data (`tools/screenshot_windows.py`), so 
 
 ## 4. Why this exists: what we learned
 
-Most existing tools assume you can switch the GPU live. On this hardware you cannot, and getting reliable Eco mode meant finding a chain of unrelated problems. This is the condensed result; every item is written up with commands and rollbacks in **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)**. All of it was verified only on the reference machine above.
+Most existing tools switch the GPU live with `supergfxctl`. On this hardware that breaks the session, and getting reliable Eco mode (first at boot, later live) meant finding a chain of unrelated problems. This is the condensed result; every item is written up with commands and rollbacks in **[docs/SYSTEM_SETUP.md](docs/SYSTEM_SETUP.md)**. All of it was verified only on the reference machine above.
 
-- **Live GPU switching breaks GNOME.** `supergfxctl -m` while the session runs killed gnome-shell and Xwayland when entering Eco, and froze Wayland gnome-shell when leaving it. So Alaz **only changes the GPU mode at boot** and never calls the live switch.
+- **`supergfxctl -m` breaks GNOME.** While the session runs it killed gnome-shell and Xwayland when entering Eco, and froze Wayland gnome-shell when leaving it. Alaz never calls it.
+- **Live switching works once the compositor stays off the NVIDIA card.** The root causes were mutter opening the NVIDIA DRM card and gnome-shell/Xwayland loading NVIDIA EGL. Two udev rules (mutter ignores the NVIDIA card; no `uaccess` ACL on the NVIDIA render node) and a session variable that points EGL at Mesa fix that, and `/dev/nvidia*` stays accessible, so GLX/EGL/Vulkan/CUDA offload still works. During a switch the helper also masks Ubuntu's `71-nvidia.rules` (otherwise udev loads and unloads the driver in an endless loop) and always undoes that. Design: [docs/LIVE_GPU_CONTRACT.md](docs/LIVE_GPU_CONTRACT.md).
 - **Entering Eco:** set `"mode": "Integrated"` in `/etc/supergfxd.conf` and reboot.
 - **Leaving Eco (the trick):** supergfxd refuses to leave Eco on its own (it forces Integrated again when it sees `dgpu_disable=1`). The working sequence is: stop supergfxd, set `/sys/bus/pci/drivers_autoprobe` to `0`, set the config mode to Hybrid, write `dgpu_disable=0`, **reboot**. The card comes back with no driver bound, so no new GPU appears while the desktop runs.
 - **Plymouth made Eco entry racy.** The boot splash opened the NVIDIA DRM device (the only one present at about 4.5 s), so supergfxd's `rmmod nvidia` failed with "module in use" and Eco ended half-done. Removing `splash` from the kernel command line fixed it, at the price of a boot that is about 6.5 s longer.
@@ -77,7 +82,7 @@ Most existing tools assume you can switch the GPU live. On this hardware you can
 - **D-Bus APIs:** asusd (`org.asuslinux.Daemon`: Platform, FanCurves, Aura) and supergfxd (`org.supergfxctl.Daemon`, read-only; its `SetMode` and `SetConfig` are deliberately never called).
 - **Sensors:** `psutil` plus sysfs/hwmon, RAPL via `powercap`.
 - **Display:** Mutter `org.gnome.Mutter.DisplayConfig` over D-Bus, or `xrandr` on X11.
-- **Privilege:** polkit + `pkexec` helper, used only for the boot-mode config and the Eco exit; a udev rule exposes only the RAPL `psys` counter.
+- **Privilege:** polkit + `pkexec` helper, used only for the GPU mode (boot-mode config, Eco exit and the live Eco/Standard switch); a udev rule exposes only the RAPL `psys` counter.
 
 ```
 alaz/
@@ -89,6 +94,7 @@ helper/
 ├── alaz-gfx-helper         root helper (stdlib only)
 ├── org.alaz.gfx.policy      polkit action
 ├── 90-alaz-rapl.rules      udev rule (RAPL psys only)
+├── 61-…/72-… .rules        udev rules for live GPU switching
 └── install.sh / uninstall.sh      privileged install, run with sudo
 tests/                             pytest, offscreen Qt
 tools/                             screenshot and widget gallery scripts
@@ -106,7 +112,7 @@ cd alaz
 ./install.sh
 ```
 
-This installs the app under `~/.local/share/alaz`, a launcher `~/.local/bin/alaz`, a desktop entry and an icon. Make sure `~/.local/bin` is on your `PATH`.
+This installs the app under `~/.local/share/alaz`, a launcher `~/.local/bin/alaz`, a desktop entry and an icon, and (when Mesa's EGL vendor file exists) `~/.config/environment.d/90-alaz-egl-mesa.conf`, which live GPU switching needs. Make sure `~/.local/bin` is on your `PATH`.
 
 ### Start at login
 
@@ -121,7 +127,7 @@ The service starts the app minimised to the tray after login (it waits up to 20 
 
 ### First run
 
-Start **Alaz** from the application menu, or run `alaz`. Performance modes, fan curves, power limits, display and keyboard controls work as soon as `asusd` is running. GPU mode switching and the total-power readout need the optional part below.
+Start **Alaz** from the application menu, or run `alaz`. Performance modes, fan curves, power limits, display and keyboard controls work as soon as `asusd` is running. GPU mode switching and the total-power readout need the optional part below. **For live Eco/Standard switching run `sudo ./helper/install.sh` and then log out and back in** (the environment snippet is only read at login).
 
 ### Optional privileged helper (needs sudo)
 
@@ -129,21 +135,26 @@ Start **Alaz** from the application menu, or run `alaz`. Performance modes, fan 
 sudo ./helper/install.sh
 ```
 
-It installs three files:
+It installs these files:
 
 | File | Purpose |
 |---|---|
 | `/usr/local/libexec/alaz-gfx-helper` | root helper, run through `pkexec` |
 | `/usr/share/polkit-1/actions/org.alaz.gfx.policy` | polkit action (`auth_admin_keep`) |
 | `/etc/udev/rules.d/90-alaz-rapl.rules` | makes the RAPL `psys` counter readable |
+| `/etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules` | mutter ignores the NVIDIA DRM card (only when the MUX is Optimus) |
+| `/etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules` | no `uaccess` ACL on the NVIDIA render node (MUX Optimus only) |
+| `/etc/udev/rules.d/70-alaz-peripherals.rules` | access to supported peripherals (Devices window) |
 
-**What the helper can do:** edit only the `"mode"` key of `/etc/supergfxd.conf` (Integrated or Hybrid), atomically with a backup; and, when leaving Eco, run the tested Eco-exit sequence (stop supergfxd, `drivers_autoprobe=0`, `dgpu_disable=0`). It refuses a symlinked config, validates all input, and refuses Eco when the MUX is set to dGPU direct.
+The polkit file declares three actions (`set-boot-mode`, `live-eco`, `live-hybrid`); the live ones do not ask for a password in an active local session.
 
-**What it cannot / does not do:** it never calls `supergfxctl`, never reboots (the app asks you, then reboots through logind), and runs only one subprocess (`/usr/bin/systemctl stop supergfxd.service`, absolute path, clean environment, no shell).
+**What the helper can do:** edit only the `"mode"` key of `/etc/supergfxd.conf` (Integrated or Hybrid), atomically with a backup; run the tested Eco-exit sequence for the boot path; and do the live switch (`live-eco` / `live-hybrid`: unload or load the NVIDIA modules, remove or rescan the PCI device, write `dgpu_disable`), plus a read-only `holders` listing of processes using the dGPU. It refuses a symlinked config, validates all input, refuses live switching when the MUX is dGPU direct or the udev rule is missing, and refuses when a process holds the dGPU (it never kills anything).
+
+**What it cannot / does not do:** it never calls `supergfxctl`, never kills a process, never reboots (the app asks you, then reboots through logind), and runs only fixed system tools by absolute path (`systemctl`, `modprobe`, `udevadm`), with a clean environment and no shell.
 
 **Security notes**
 
-- Each GPU change asks for administrator authentication (`auth_admin_keep`: the authorisation is remembered for a short while).
+- Boot-time GPU changes ask for administrator authentication (`auth_admin_keep`: remembered for a short while). Live switches (`live-eco`, `live-hybrid`) are allowed without a password for the active local session, because they can only move between Eco and Standard and refuse when apps use the GPU; remove or edit the policy file if you prefer a prompt.
 - The udev rule makes `energy_uj` of the `psys` RAPL domain world-readable; package, core and DRAM domains are not touched. World-readable RAPL energy counters have been used in side-channel research (PLATYPUS); the exposure is limited to the platform counter, but if that concerns you, skip the helper's udev rule (delete it; the system-power reading will then be unavailable).
 
 ### Uninstall
@@ -165,16 +176,18 @@ These make GPU switching and profiles reliable. All are optional, and **all boot
 6. Dual boot: set `GRUB_DEFAULT` by entry name.
 7. Keep `pcie_aspm=off` if your model needs it (it did on the reference machine).
 
-The guide also lists what **not** to do: live `supergfxctl -m`, blacklisting NVIDIA autoload (four black-screen boots), and a supergfxd wait drop-in (adds 20 s to every boot).
+Section 7d of the guide covers the live-switching setup (what gets installed, how to verify it, side effects, rollback). It also lists what **not** to do: live `supergfxctl -m`, blacklisting NVIDIA autoload (four black-screen boots), and a supergfxd wait drop-in (adds 20 s to every boot).
 
 ## 8. Safety and limitations
 
 - **Only one model tested.** Treat everything else as unverified. Bug reports from other models are valuable.
-- **Leaving Eco requires an immediate reboot.** The dGPU is re-enabled right away with no driver bound, and `drivers_autoprobe` stays `0` until you reboot. The app prompts for the reboot.
-- **Eco has no external display** on ports wired to the dGPU.
+- **Live switching needs the helper install and a re-login**, and only works while the MUX is in Optimus (Standard/Eco) mode. Without that, leaving Eco falls back to an immediate reboot (the dGPU is re-enabled with no driver bound and `drivers_autoprobe` stays `0` until then); the app prompts for it.
+- **Apps using the dGPU block a live switch.** Nothing is killed: you can wait for them to close, apply at next reboot, or cancel.
+- **Ports wired to the dGPU** (on the reference machine one HDMI and one DisplayPort) give no external display in Eco, and with the live-switching udev rule also not in Standard.
+- **EGL-only apps run on the iGPU by default** (for example the Blender viewport on Wayland). To use the dGPU, launch them with `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`; GNOME's "Launch using discrete GPU" does not set it. CUDA/OptiX rendering is unaffected.
+- **Open items:** Ultimate (MUX) is untested on hardware; a live Eco switch with an external monitor connected is still to be tested (the internal panel came back on by itself in one run). See [docs/TODO.md](docs/TODO.md).
 - **Removing `splash` costs about 6.5 s of boot time** on the reference machine.
 - **Custom mode shares Turbo's fan curves** (it uses the Performance policy). Leaving Custom writes only the policy; whether the firmware then restores its own limits was not verified.
-- **Ultimate (MUX) and Optimize GPU modes are not supported yet.**
 - Idle draw on the reference machine is about 15 to 16 W on battery (measured; the RAPL `psys` reading is 1 to 2 W higher). `pcie_aspm=off` likely costs some of it but is required on this model (see above).
 - `nvidia-powerd` was not installed on the reference machine, and Dynamic Boost depends on it; the effect of the Dynamic Boost slider there was not investigated.
 - The interface is available in English and Turkish only (Settings → Language; other languages are welcome as contributions).
@@ -187,9 +200,9 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest tests
 QT_QPA_PLATFORM=offscreen python3 tools/screenshot_windows.py docs/screenshots --lang en   # render windows with fake state
 ```
 
-The suite has 262 tests (backends, core controller and state, widgets, windows, the root helper) and runs offscreen. **Tests never write to the real system**; write paths are exercised with mocks, fakes and a re-rooted helper (`ALAZ_HELPER_TESTROOT`, honoured only when not root).
+The suite has 591 tests (backends, core controller and state, widgets, windows, the root helper) and runs offscreen. **Tests never write to the real system**; write paths are exercised with mocks, fakes and a re-rooted helper (`ALAZ_HELPER_TESTROOT`, honoured only when not root).
 
-Ground rules for contributions (from [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)): never block the GUI thread; never call `supergfxctl -m` or supergfxd `SetMode`/`SetConfig`; do not wake the dGPU for monitoring; unreadable values become `None` and show as an em dash, never an invented number; use `logging`, not `print`. Add or update tests with your change. Pull requests are welcome, especially: translations, other ROG models, Ultimate/MUX support, other desktop environments.
+Ground rules for contributions (from [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)): never block the GUI thread; never call `supergfxctl -m` or supergfxd `SetMode`/`SetConfig` (live switching goes only through the helper, see [docs/LIVE_GPU_CONTRACT.md](docs/LIVE_GPU_CONTRACT.md)); do not wake the dGPU for monitoring; unreadable values become `None` and show as an em dash, never an invented number; use `logging`, not `print`. Add or update tests with your change. Pull requests are welcome, especially: translations, other ROG models, Ultimate/MUX testing, other desktop environments.
 
 ### How it was built
 

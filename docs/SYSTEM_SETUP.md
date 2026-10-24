@@ -24,11 +24,16 @@ Placeholders used below: `<disk-partition>` is your EFI/Windows partition as sho
 
 ## 0. Background in one paragraph
 
-On this hardware, switching the GPU while the desktop is running (`supergfxctl -m ...`)
-either kills or freezes GNOME on Wayland, in both directions. The only safe way to change
-GPU mode is at boot. Everything in this guide serves that: make the boot deterministic,
-remove other programs that fight over the GPU or the power profile, and use known-good
-manual procedures for entering and leaving Eco mode.
+On this hardware, switching the GPU while the desktop is running with **`supergfxctl -m ...`**
+either kills or freezes GNOME on Wayland, in both directions. That call stays forbidden. Until
+2026-10-23 the only safe way to change GPU mode was at boot, and sections 2 to 7c serve that: make
+the boot deterministic, remove other programs that fight over the GPU or the power profile, and
+use known-good manual procedures for entering and leaving Eco.
+
+Since 2026-10-24 Alaz can also switch **Eco <-> Standard (Hybrid) live, without a reboot**, but not with
+`supergfxctl`. It uses its own root helper (`live-eco` / `live-hybrid`) and only when the preconditions in
+**section 7d** are installed. Without them Alaz falls back to the boot-time path. Ultimate (MUX) is
+always reboot-only.
 
 ---
 
@@ -205,7 +210,8 @@ here.)
 
 ## 7. Eco mode: manual procedures
 
-Prerequisites: sections 2, 3b and 4 applied. Run these on battery with no external monitor
+These are the boot-time procedures, also used by Alaz when live switching is not set up
+(section 7d) or MUX is not Optimus. Prerequisites: sections 2, 3b and 4 applied. Run these on battery with no external monitor
 attached (an external DP/HDMI port wired to the dGPU does not work in Eco, which is
 expected). Alaz's GPU Mode tiles do exactly these things through a small root
 helper; the manual versions are for when you want to do it by hand or the app is not
@@ -261,6 +267,79 @@ Why this is needed: if you only edit the config, supergfxd's boot safety check s
 
 ---
 
+### 7d. Live Eco <-> Standard switching (no reboot)
+
+Why live switching used to break the session: mutter opened the NVIDIA DRM card, and gnome-shell /
+Xwayland loaded the NVIDIA EGL library, so when the card appeared or vanished the compositor was
+touched. The design that works (and its exit codes) is in `docs/LIVE_GPU_CONTRACT.md`. The
+preconditions are:
+
+| Piece | What it does | Installed by |
+|---|---|---|
+| `/etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules` | tags the NVIDIA DRM card `mutter-device-ignore`, only when `gpu_mux_mode=1`, so mutter never opens it | `sudo helper/install.sh` |
+| `/etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules` | removes the `uaccess` ACL from the NVIDIA `renderD*` node (MUX=1 only), so Chromium/Electron apps do not keep it open. `/dev/nvidia*` stays accessible, so GLX/EGL/Vulkan/CUDA offload still works (GLX and EGL offload verified) | `sudo helper/install.sh` |
+| `~/.config/environment.d/90-alaz-egl-mesa.conf` | `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`: without it Xwayland keeps `/dev/nvidia0` open | `./install.sh` (user, no sudo) |
+| polkit actions `org.alaz.gfx.live-eco`, `org.alaz.gfx.live-hybrid` | `allow_active=yes`: no password for the active session. Every action carries `exec.argv1` because pkexec picks the first action matching path + argv1 (`set-boot-mode` now has one too; before that the owner saw a password prompt) | `sudo helper/install.sh` |
+
+**Apply.** Run `sudo helper/install.sh` and `./install.sh`, then **log out and back in** (the
+environment.d file is only read at login). The helper installer does not trigger udev on the DRM
+subsystem, so the running session is not disturbed; the rules apply to the card the next time it appears
+(or after a reboot).
+
+**Verify** (MUX must be 1, i.e. Standard/Eco, not Ultimate):
+
+```bash
+cat /sys/devices/platform/asus-nb-wmi/gpu_mux_mode              # 1
+udevadm info /dev/dri/card0 | grep mutter-device-ignore         # the NVIDIA card (check which cardN it is)
+ls -l /dev/dri/renderD129                                       # no '+' after the mode bits = no ACL
+echo $__EGL_VENDOR_LIBRARY_FILENAMES                            # .../50_mesa.json (after re-login)
+tools/gpu_probe.sh                                              # read-only: who holds the dGPU
+/usr/local/libexec/alaz-gfx-helper status                       # "live_ready": true
+```
+
+**How the helper keeps udev from looping.** During a switch, Ubuntu's
+`/usr/lib/udev/rules.d/71-nvidia.rules` (it runs `modprobe nvidia-modeset/-drm/-uvm` by name when the
+driver binds and `modprobe -r` when it unbinds) plus `80-drivers.rules` modalias autoload created an
+endless nvidia load/unload loop: the taskbar flickered every ~3 s and only a reboot or masking the rule
+stopped it. The helper therefore masks the rule for the duration of the switch
+(`/run/udev/rules.d/71-nvidia.rules -> /dev/null`), writes a runtime blacklist
+(`/run/modprobe.d/alaz-live-nvidia.conf`), runs `udevadm control --reload` (udevd caches both), and
+always undoes all of it, also on failure. Both files live under `/run`, so they cannot survive a reboot.
+
+**Behaviour and timing.** Live Eco takes about 10 s, live Hybrid about 13 s (writing
+`dgpu_disable=0` alone takes about 8 s). Nothing is ever killed: if an app really uses the dGPU, the
+helper refuses ("busy", exit 9, nothing changed) and Alaz offers to wait for the app to close, apply at
+next reboot, or cancel. If a switch fails midway the boot config already has the target mode, so a
+reboot finishes it safely.
+
+**Side effects (honest list)**
+
+- Ports wired to the NVIDIA GPU (on the reference machine card0 HDMI-A-2 / DP-4) do not work in Hybrid
+  when the mutter-ignore rule is active. They do not work in Eco either.
+- EGL-only apps (for example the Blender viewport on Wayland) now render on the iGPU by default. To run
+  one on the dGPU, set `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` for
+  that app. GNOME's "Launch using discrete GPU" sets only the GLX/Vulkan variables, not this one.
+  Cycles CUDA/OptiX is unaffected.
+- `nvidia-persistenced` ended up inactive after a live Hybrid switch on the reference machine (cause
+  unknown, no visible effect).
+- With an external monitor attached, mutter turned the internal panel (eDP-1) back on by itself about 1 s
+  after `dgpu_disable=1`. Not understood yet; see `docs/TODO.md`.
+
+**Roll back.** Remove the live-switch pieces and reboot:
+
+```bash
+sudo rm -f /etc/udev/rules.d/61-alaz-mutter-ignore-nvidia.rules /etc/udev/rules.d/72-alaz-nvidia-render-noaccess.rules
+sudo udevadm control --reload-rules
+rm -f ~/.config/environment.d/90-alaz-egl-mesa.conf
+sudo reboot
+```
+
+(`sudo helper/uninstall.sh` and `./uninstall.sh` do the same.) Without rule 61 the helper reports
+`precondition` and the app uses the boot-time path again. If a switch left things odd, a reboot with the
+boot config already set (the helper does this before touching hardware) is always safe.
+
+---
+
 ## 8. Verification checklist
 
 | Check | Command | Expected |
@@ -271,6 +350,7 @@ Why this is needed: if you only edit the config, supergfxd's boot safety check s
 | ppd masked | `systemctl is-enabled power-profiles-daemon` | `masked` |
 | gpu-manager masked | `systemctl is-enabled gpu-manager.service` | `masked` |
 | No splash | `cat /proc/cmdline` | no `splash` |
+| Live switching ready | `udevadm info /dev/dri/card0 \| grep mutter-device-ignore` | tag present (section 7d) |
 | dGPU asleep when idle | `cat /sys/bus/pci/devices/<nvidia-pci-id>/power/runtime_status` | `suspended` |
 
 Find the NVIDIA PCI id with `lspci | grep -i nvidia` (for example `01:00.0`; the sysfs name
@@ -280,9 +360,14 @@ carries a `0000:` prefix).
 
 ## 9. Things that did not work, and the "never do this" list
 
-1. **Live switching with `supergfxctl -m ...`.** Entering Eco live killed gnome-shell and
-   Xwayland (session crash). Leaving Eco live froze Wayland gnome-shell while it hot-plugged
-   the new GPU. Both directions are unsafe on this machine. Alaz never calls it.
+1. **Live switching with `supergfxctl -m ...`.** *(Partly superseded 2026-10-24: live switching
+   now works through Alaz's own helper once the section 7d preconditions are installed. The
+   `supergfxctl -m` / `SetMode` call itself is still forbidden.)* Entering Eco live killed
+   gnome-shell and Xwayland (session crash). Leaving Eco live froze Wayland gnome-shell while it
+   hot-plugged the new GPU. Root causes: mutter held the NVIDIA DRM card and gnome-shell/Xwayland
+   loaded NVIDIA EGL (fixed by rule 61 and the EGL environment snippet), plus Ubuntu's
+   `71-nvidia.rules` load/unload loop (masked by the helper during a switch). Alaz never calls
+   `supergfxctl -m`.
 
 2. **Blacklisting automatic NVIDIA loading** (a `modprobe.d` file such as
    `alaz-nvidia-noauto.conf`). It removed the "fallen off the bus" warnings in Eco, but
