@@ -145,7 +145,7 @@ def test_aura_sync_maps_each_target(env):
     flush(env)
     assert env.mouse.calls == [("led", 1, 70, (10, 20, 30), True)]
     assert env.headset.calls == [("light", 2, 70, (10, 20, 30))]
-    assert ("color", (10, 20, 30)) in env.asusd.calls              # keyboard: static colour only
+    assert ("color", (1, 2, 3)) in env.asusd.calls                 # keyboard: static colour only, linearised
     assert not any(c[0] == "kbd" for c in env.asusd.calls)         # never touches keyboard brightness
     env.mouse.calls.clear()
     env.headset.calls.clear()

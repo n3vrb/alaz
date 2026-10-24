@@ -13,6 +13,7 @@ from ..backend.dbus_util import Typed
 from ..backend.types import Epp, FanCurve, GfxMode, GfxPower, Profile
 from ..i18n import tr
 from ..backend.ddc import FEATURES as DDC_FEATURES
+from ..backend.ledcolor import led_decode, led_encode
 from .state import AURA_EFFECTS, AURA_TARGETS, AppState, AuraSyncView, AuraView, DisplayView, GfxView
 
 log = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ class Controller(QObject):
         # Aura Sync: persisted view, per-target "ready" flags (re-apply only on False -> True) and the last
         # parameters sent to each target (so a change that doesn't concern a device never touches it).
         self._aura_ready = {"mouse": False, "headset": False}
+        self._kbd_written: dict[tuple, tuple] = {}   # raw keyboard colour -> sRGB colour we picked
         self._aura_last: dict[str, tuple] = {}
         self._aura_timer = QTimer(self)
         self._aura_timer.setSingleShot(True)
@@ -647,9 +649,11 @@ class Controller(QObject):
         elif name == "LedModeData":
             try:
                 c = value[2]
-                color = (int(c[0]), int(c[1]), int(c[2]))
+                raw = (int(c[0]), int(c[1]), int(c[2]))
             except (TypeError, ValueError, IndexError):
                 return
+            # the keyboard gets linearised colours: show the colour we picked (exact) or the decoded value
+            color = self._kbd_written.get(raw) or led_decode(raw)
             self.state.set_aura(AuraView(cur.brightness, color))
 
     def _on_aura_cached(self) -> None:
@@ -675,9 +679,17 @@ class Controller(QObject):
         last = self.settings.value(K_KBD_LAST, 2, type=int)
         self.set_kbd_brightness(max(1, min(3, last)))
 
+    def _send_kbd_color(self, rgb) -> None:
+        """Static keyboard colour. LEDs are linear, UI colours sRGB -> linearise (VERIFIED visually: #FFD84D
+        looked greenish raw, FF AF 13 matched)."""
+        rgb = tuple(int(c) for c in rgb)
+        raw = led_encode(rgb)
+        self._kbd_written[raw] = rgb
+        self._pulse("kbd", lambda: self.asusd.set_aura_static(raw))
+
     def set_kbd_color(self, rgb: tuple[int, int, int]) -> None:
         self._aura_last.pop("keyboard", None)
-        self._pulse("kbd", lambda: self.asusd.set_aura_static(tuple(rgb)))
+        self._send_kbd_color(rgb)
 
     # ----------------------------------------------------------- peripherals
     def _start_peripherals(self) -> None:
@@ -881,7 +893,7 @@ class Controller(QObject):
                 if self._aura_last.get(t) == params:
                     continue
                 self._aura_last[t] = params
-                self._pulse("kbd", lambda: self.asusd.set_aura_static(tuple(v.color)))
+                self._send_kbd_color(v.color)
             elif t == "mouse" and self.mouse is not None:
                 params = (_AURA_MOUSE_MODE[v.effect], v.brightness, tuple(v.color))
                 # the mouse keeps its lighting in flash: on every wake-up it already shows this -> no write

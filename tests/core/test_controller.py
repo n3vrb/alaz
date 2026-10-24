@@ -523,8 +523,20 @@ def test_toggle_kbd_light(env):
 def test_aura_state(env):
     env.ctl.start()
     env.asusd.auraChanged.emit("Brightness", 2)
+    # the keyboard holds linearised colours: a raw value is shown decoded (FF AF 13 -> #FFD84D)
+    env.asusd.auraChanged.emit("LedModeData", (0, 0, (0xFF, 0xAF, 0x13), (0, 0, 0), 235, 0))
+    assert env.state.aura.brightness == 2 and env.state.aura.color == (0xFF, 0xD8, 0x4D)
+
+
+def test_kbd_color_linearised_and_shown_exactly(env):
+    # VERIFIED visually: #FFD84D sent raw looked greenish on the keyboard; FF AF 13 matched the swatch
+    env.ctl.start()
+    env.ctl.set_kbd_color((0xFF, 0xD8, 0x4D))
+    assert ("color", (0xFF, 0xAF, 0x13)) in env.asusd.calls
+    # a dark colour is lossy through the decode, but the colour we picked is shown exactly
+    env.ctl.set_kbd_color((10, 20, 30))
     env.asusd.auraChanged.emit("LedModeData", (0, 0, (1, 2, 3), (0, 0, 0), 235, 0))
-    assert env.state.aura.brightness == 2 and env.state.aura.color == (1, 2, 3)
+    assert env.state.aura.color == (10, 20, 30)
 
 
 # ------------------------------------------------- helper exit code (orchestrator fix)

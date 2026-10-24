@@ -11,6 +11,7 @@ from typing import Callable
 
 from PyQt6.QtCore import QObject
 
+from ..ledcolor import led_decode, led_encode  # LED colours are linearised (see ledcolor.py)
 from .hidraw import HidClientBase, HidTransport, is_error_reply, pad
 
 log = logging.getLogger(__name__)
@@ -30,31 +31,6 @@ POLLING_BY_CODE = {v: k for k, v in POLLING_CODES.items()}
 SLEEP_CODES = (0, 1, 2, 3, 4, 0xFF)  # 1, 2, 3, 5, 10 min, never
 LED_MODES = (0, 1, 2, 4, 6, 0xF0)
 SAVE = b"\x50\x03"
-
-
-# The LED drives its PWM linearly while UI colours are sRGB (gamma-encoded): sent raw, mixed colours look washed
-# out (VERIFIED visually: #FF5A5F showed pink; its linearised FF 1A 1E looks like the swatch). Writes are
-# linearised; reads are converted back.
-def _srgb_to_linear(c: int) -> int:
-    x = c / 255.0
-    lin = x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
-    return round(lin * 255)
-
-
-def _linear_to_srgb(c: int) -> int:
-    x = c / 255.0
-    enc = x * 12.92 if x <= 0.0031308 else 1.055 * x ** (1 / 2.4) - 0.055
-    return round(enc * 255)
-
-
-def led_encode(rgb) -> tuple[int, int, int]:
-    """UI (sRGB) colour -> value written to the LED."""
-    return tuple(_srgb_to_linear(int(c)) for c in rgb)
-
-
-def led_decode(rgb) -> tuple[int, int, int]:
-    """Value read from the LED -> UI (sRGB) colour (lossy for very dark channels)."""
-    return tuple(_linear_to_srgb(int(c)) for c in rgb)
 
 
 @dataclass
